@@ -51,7 +51,7 @@ export const urbanTreesArticle = {
   topic: "自然",
   qualityScore: 87,
   summary: "树荫和蒸腾作用如何缓解城市热岛效应。",
-  introZh: "树荫和蒸腾作用如何缓解城市热岛效应。适合刚开始读短文的读者。",
+  introZh: "树荫和蒸腾作用如何缓解城市热岛效应。",
   paragraphs: [
     "Cities can feel much hotter than the fields around them. Streets, cars, and dark roofs hold the sun’s heat. This is called the urban heat island.",
     "Trees help in two simple ways. Their leaves make shade, so the ground stays cooler. They also release water into the air. That process is called transpiration, and it lowers the temperature around the tree.",
@@ -73,7 +73,7 @@ export const oceanHeatArticle = {
   topic: "科技",
   qualityScore: 84,
   summary: "卫星与 Argo 浮标如何共同观测海洋热量。",
-  introZh: "卫星与 Argo 浮标如何共同观测海洋里储存的热量。句子更长，适合中高级读者。",
+  introZh: "卫星与 Argo 浮标如何共同观测海洋里储存的热量。",
   paragraphs: [
     "Most of the extra heat trapped by greenhouse gases does not stay in the air. It slips into the ocean, where it is harder to notice and harder to measure. Surface temperatures tell only part of the story, because warmth can sink, drift, and hide in deeper layers for years.",
     "Scientists now combine two kinds of evidence. Satellites watch the skin of the sea from above, mapping patterns of warmth and current. Thousands of drifting Argo floats dive and rise through the water, recording temperature and salinity on the way. Together they turn a vague idea — “the ocean is warming” — into a record with depth and time.",
@@ -94,7 +94,7 @@ export const libraryQuietArticle = {
   topic: "文化",
   qualityScore: 86,
   summary: "公共图书馆如何以低声的方式支撑一个城市的学习与公共生活。",
-  introZh: "公共图书馆如何以低声的方式支撑城市的学习与公共生活。句式更密，适合高级读者。",
+  introZh: "公共图书馆如何以低声的方式支撑城市的学习与公共生活。",
   paragraphs: [
     "A public library rarely announces itself as infrastructure, yet that is precisely what it is: a civic machine for attention, memory, and access. It stores not only books but the conditions under which a person without money, quiet, or a private desk can still think in public.",
     "The building’s apparent stillness is misleading. Catalogues, interlibrary loans, opening hours, and the unglamorous work of weeding a collection decide who meets which idea, and when. A forgotten local newspaper, once digitized, can rearrange a family’s sense of the past. A librarian’s refusal to treat every query as a transaction keeps a different ethic alive: curiosity as a right rather than a premium feature.",
@@ -145,11 +145,18 @@ export const themeOptions = [
   { id: "night", label: "夜间" },
 ];
 
+export const listenRateOptions = [
+  { id: 0.85, label: "慢" },
+  { id: 1, label: "常" },
+  { id: 1.15, label: "快" },
+];
+
 export const defaultReadingPrefs = {
   typeface: "newsreader",
   fontScale: 1,
   lineHeight: 1.85,
   measure: "comfortable",
+  listenRate: 1,
 };
 
 export const contextualDictionary = {

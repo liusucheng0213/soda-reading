@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { translateWord } from "./api.js";
+import { clearTranslationMemory, peekWordTranslation, translateWord } from "./api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearTranslationMemory();
 });
 
 describe("word translation API contract", () => {
@@ -55,5 +56,42 @@ describe("word translation API contract", () => {
       status: 503,
       retryable: true,
     });
+  });
+
+  it("reuses one in-flight request and then serves memory without a second fetch", async () => {
+    const fetchMock = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          scope: "word",
+          quality: "contextual",
+          translation: "树荫",
+          lemma: "shade",
+          phonetic: "/ʃeɪd/",
+          partOfSpeech: "n.",
+          provider: "deepseek",
+          model: "deepseek-chat",
+          cached: false,
+          latencyMs: 420,
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = { word: "shade", sentence: "Their leaves make shade." };
+    const [first, second] = await Promise.all([
+      translateWord(payload),
+      translateWord(payload),
+    ]);
+    expect(first.translation).toBe("树荫");
+    expect(second.translation).toBe("树荫");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const cached = await translateWord(payload);
+    expect(cached.cacheLayer).toBe("client");
+    expect(peekWordTranslation(payload).translation).toBe("树荫");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

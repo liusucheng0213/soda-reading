@@ -56,6 +56,48 @@ export function estimateReadingMinutes(text) {
   return Math.max(1, Math.ceil(words / 180));
 }
 
+export function remainingReadingMinutes(text, progress = 0, fallbackMinutes = 5) {
+  const leftover = 1 - Math.min(0.99, Math.max(0, progress || 0));
+  const estimated = estimateReadingMinutes(text || "a");
+  const listed = Math.max(1, Number(fallbackMinutes) || 5);
+  const total = Math.max(estimated, listed);
+  return Math.max(1, Math.round(total * leftover));
+}
+
+export function flattenSentences(paragraphs = []) {
+  return (paragraphs ?? []).flatMap((paragraph, paragraphIndex) =>
+    splitSentences(paragraph).map((sentence, sentenceIndex) => ({
+      paragraphIndex,
+      sentenceIndex,
+      key: `${paragraphIndex}-${sentenceIndex}`,
+      text: sentence,
+    })),
+  );
+}
+
+export function spokenProgress(index, total) {
+  if (!total) return 0;
+  const safe = Number.isFinite(index) ? index : -1;
+  if (safe < 0) return 0;
+  return Math.min(1, (safe + 1) / total);
+}
+
+export function wordKeyAtChar(sentenceKey, sentence, charIndex) {
+  if (!sentence || !Number.isFinite(charIndex) || charIndex < 0) return "";
+  const { body } = splitSentenceEnding(sentence);
+  const items = annotateTokens(tokenizeSentence(body), sentenceKey);
+  let cursor = 0;
+  let lastWordKey = "";
+  for (const item of items) {
+    const start = cursor;
+    cursor += item.token.length;
+    if (!item.word) continue;
+    lastWordKey = item.key;
+    if (charIndex >= start && charIndex < cursor) return item.key;
+  }
+  return charIndex >= cursor ? lastWordKey : "";
+}
+
 export async function sha256(input) {
   const bytes = input instanceof ArrayBuffer
     ? input

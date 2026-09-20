@@ -4,16 +4,72 @@ import { displayFeed } from "./feed.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 const translationMemoryCache = new Map();
+const inflightTranslations = new Map();
 const TRANSLATION_MEMORY_LIMIT = 400;
+const TRANSLATION_MEMORY_KEY = "soda.translationMemory";
+
+function loadTranslationMemory() {
+  try {
+    const raw = globalThis.localStorage?.getItem(TRANSLATION_MEMORY_KEY);
+    if (!raw) return;
+    const entries = JSON.parse(raw);
+    if (!Array.isArray(entries)) return;
+    for (const [key, value] of entries.slice(-TRANSLATION_MEMORY_LIMIT)) {
+      if (typeof key === "string" && value?.translation) translationMemoryCache.set(key, value);
+    }
+  } catch {
+    /* private mode or quota */
+  }
+}
+
+function persistTranslationMemory() {
+  try {
+    globalThis.localStorage?.setItem(
+      TRANSLATION_MEMORY_KEY,
+      JSON.stringify([...translationMemoryCache.entries()]),
+    );
+  } catch {
+    /* quota */
+  }
+}
+
+loadTranslationMemory();
 
 function translationKey(scope, payload) {
-  return JSON.stringify({
-    scope,
-    word: payload.word?.toLowerCase() ?? "",
-    sentence: payload.sentence?.replace(/\s+/g, " ").trim() ?? "",
-    before: payload.before?.replace(/\s+/g, " ").trim() ?? "",
-    after: payload.after?.replace(/\s+/g, " ").trim() ?? "",
-    contentHash: payload.contentHash ?? "",
+  const sentence = payload.sentence?.replace(/\s+/g, " ").trim() ?? "";
+  const contentHash = payload.contentHash ?? "";
+  if (scope === "word") {
+    return JSON.stringify({
+      scope,
+      word: payload.word?.toLowerCase() ?? "",
+      sentence,
+      contentHash,
+    });
+  }
+  return JSON.stringify({ scope, sentence, contentHash });
+}
+
+export function peekWordTranslation(payload) {
+  const remembered = translationMemoryCache.get(translationKey("word", payload));
+  return remembered ? { ...remembered, cached: true, cacheLayer: "client", latencyMs: 0 } : null;
+}
+
+export function clearTranslationMemory() {
+  translationMemoryCache.clear();
+  inflightTranslations.clear();
+}
+
+function abortIfSignaled(signal) {
+  if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
+}
+
+function followTranslation(task, signal) {
+  abortIfSignaled(signal);
+  if (!signal) return task;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Request cancelled", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    task.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
 }
 
@@ -22,6 +78,7 @@ function rememberTranslation(key, value) {
   if (translationMemoryCache.size > TRANSLATION_MEMORY_LIMIT) {
     translationMemoryCache.delete(translationMemoryCache.keys().next().value);
   }
+  persistTranslationMemory();
 }
 
 export class ApiError extends Error {
@@ -445,53 +502,58 @@ export async function revokeAdminUserSessions(userId) {
 }
 
 export async function translateWord({ word, sentence, before = "", after = "", contentHash = "", signal }) {
-  const key = translationKey("word", { word, sentence, before, after, contentHash });
+  const key = translationKey("word", { word, sentence, contentHash });
   const remembered = translationMemoryCache.get(key);
   if (remembered) return { ...remembered, cached: true, cacheLayer: "client", latencyMs: 0 };
-  try {
-    const payload = {
-        word,
-        sentence,
-        before,
-        after,
-        contentHash,
-        scope: "word",
-        qualityMode: "free",
-        targetLanguage: "zh-CN",
-    };
-    const result = cloudClient
-      ? await cloudClient.translate(payload, signal)
-      : await request("/translations/word", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      signal,
-      timeout: 18000,
-    });
-    rememberTranslation(key, result);
-    return result;
-  } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    const normalized = word.toLowerCase();
-    const entry = contextualDictionary[normalized];
-    if (entry) {
-      const result = {
-        scope: "word",
-        quality: "basic",
-        ...entry,
-        provider: "local-corpus",
-        model: "dictionary",
-        cached: true,
-        latencyMs: 0,
-      };
-      rememberTranslation(key, result);
-      return result;
-    }
-    throw error;
+  let task = inflightTranslations.get(key);
+  if (!task) {
+    task = (async () => {
+      try {
+        const payload = {
+          word,
+          sentence,
+          before,
+          after,
+          contentHash,
+          scope: "word",
+          qualityMode: "free",
+          targetLanguage: "zh-CN",
+        };
+        const result = cloudClient
+          ? await cloudClient.translate(payload)
+          : await request("/translations/word", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            timeout: 18000,
+          });
+        rememberTranslation(key, result);
+        return result;
+      } catch (error) {
+        const normalized = word.toLowerCase();
+        const entry = contextualDictionary[normalized];
+        if (entry) {
+          const result = {
+            scope: "word",
+            quality: "basic",
+            ...entry,
+            provider: "local-corpus",
+            model: "dictionary",
+            cached: true,
+            latencyMs: 0,
+          };
+          rememberTranslation(key, result);
+          return result;
+        }
+        throw error;
+      }
+    })().finally(() => inflightTranslations.delete(key));
+    inflightTranslations.set(key, task);
   }
+  return followTranslation(task, signal);
 }
 
 export async function translateSentence({ sentence, article, before = "", after = "", contentHash = "", signal }) {
-  const key = translationKey("sentence", { sentence, before, after, contentHash });
+  const key = translationKey("sentence", { sentence, contentHash });
   const remembered = translationMemoryCache.get(key);
   if (remembered) return { ...remembered, cached: true, cacheLayer: "client", latencyMs: 0 };
   const translation = article?.sentenceTranslations?.[sentence];
@@ -510,8 +572,10 @@ export async function translateSentence({ sentence, article, before = "", after 
     rememberTranslation(key, result);
     return result;
   }
-  try {
-    const payload = {
+  let task = inflightTranslations.get(key);
+  if (!task) {
+    task = (async () => {
+      const payload = {
         sentence,
         before,
         after,
@@ -519,19 +583,18 @@ export async function translateSentence({ sentence, article, before = "", after 
         scope: "sentence",
         qualityMode: "free",
         targetLanguage: "zh-CN",
-    };
-    const result = cloudClient
-      ? await cloudClient.translate(payload, signal)
-      : await request("/translations/sentence", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      signal,
-      timeout: 18000,
-    });
-    rememberTranslation(key, result);
-    return result;
-  } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    throw error;
+      };
+      const result = cloudClient
+        ? await cloudClient.translate(payload)
+        : await request("/translations/sentence", {
+          method: "POST",
+          body: JSON.stringify(payload),
+          timeout: 18000,
+        });
+      rememberTranslation(key, result);
+      return result;
+    })().finally(() => inflightTranslations.delete(key));
+    inflightTranslations.set(key, task);
   }
+  return followTranslation(task, signal);
 }
