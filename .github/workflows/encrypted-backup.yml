@@ -1,0 +1,59 @@
+name: Encrypted Supabase backup
+
+on:
+  schedule:
+    - cron: "40 16 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: soda-database-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark job start
+        run: date +%s > /tmp/soda-job-start
+      - name: Validate backup secrets
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
+        run: |
+          test -n "$DATABASE_URL"
+          test -n "$AGE_PUBLIC_KEY"
+      - name: Install PostgreSQL client and age
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client age
+      - name: Create and encrypt dump
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
+        run: |
+          mkdir -p backup
+          pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl --file=backup/soda-reading.dump
+          age --recipient "$AGE_PUBLIC_KEY" --output backup/soda-reading.dump.age backup/soda-reading.dump
+          rm backup/soda-reading.dump
+          sha256sum backup/soda-reading.dump.age > backup/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soda-reading-backup-${{ github.run_id }}
+          path: backup/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Record Action minutes
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          python -m pip install SQLAlchemy==2.0.36 psycopg2-binary==2.9.10
+          STARTED=$(cat /tmp/soda-job-start)
+          FINISHED=$(date +%s)
+          MINUTES=$(python -c "print(round(($FINISHED-$STARTED)/60, 2))")
+          python backend/scripts/record_platform_usage.py github_action_minutes "$MINUTES" '{"workflow":"encrypted-backup","runId":"${{ github.run_id }}"}'

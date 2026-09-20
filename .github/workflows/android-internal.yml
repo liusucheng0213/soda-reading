@@ -1,0 +1,63 @@
+name: Android internal APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "EAS build profile"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - production
+
+concurrency:
+  group: soda-android-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  submit-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark job start
+        run: date +%s > /tmp/soda-job-start
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Validate Android bundle
+        run: npm run typecheck:mobile
+      - name: Submit internal APK build
+        working-directory: apps/mobile
+        run: eas build --platform android --profile "${{ inputs.profile }}" --non-interactive --no-wait
+      - name: Record EAS build use
+        run: |
+          python -m pip install SQLAlchemy==2.0.36 psycopg2-binary==2.9.10
+          python backend/scripts/record_platform_usage.py eas_android_build 1 '{"profile":"${{ inputs.profile }}","runId":"${{ github.run_id }}"}'
+      - name: Record Action minutes
+        if: always()
+        run: |
+          python -m pip install SQLAlchemy==2.0.36 psycopg2-binary==2.9.10
+          STARTED=$(cat /tmp/soda-job-start)
+          FINISHED=$(date +%s)
+          MINUTES=$(python -c "print(round(($FINISHED-$STARTED)/60, 2))")
+          python backend/scripts/record_platform_usage.py github_action_minutes "$MINUTES" '{"workflow":"android-internal","runId":"${{ github.run_id }}"}'

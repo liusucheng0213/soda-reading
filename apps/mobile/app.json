@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "苏打阅读",
+    "slug": "soda-reading-internal",
+    "version": "0.1.0",
+    "platforms": [
+      "android"
+    ],
+    "orientation": "portrait",
+    "icon": "../../public/app-icon-1024.png",
+    "scheme": "sodareading",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "cn.sodareading.internal",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "../../public/app-icon-1024.png",
+        "backgroundColor": "#F8F5ED"
+      },
+      "permissions": [
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#2F9F96",
+          "defaultChannel": "learning-reminders"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/REPLACE_WITH_EAS_PROJECT_ID"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
+  }
+}

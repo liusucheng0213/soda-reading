@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "env": {
+        "EXPO_PUBLIC_RELEASE_CHANNEL": "internal"
+      }
+    },
+    "production": {
+      "distribution": "internal",
+      "channel": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  },
+  "submit": {}
+}
