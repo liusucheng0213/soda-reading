@@ -243,10 +243,27 @@ def excerpt_coherence(paragraphs: list[str]) -> tuple[bool, list[str]]:
     return not reasons, reasons
 
 
+_PROTECTED_PERIOD = re.compile(
+    r"\b(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|Gen|Col|Capt|Lt|Fig|No|vs|U\.S|U\.K|a\.m|p\.m|e\.g|i\.e)\.",
+    re.IGNORECASE,
+)
+
+
+def split_reading_sentences(text: str) -> list[str]:
+    protected = _PROTECTED_PERIOD.sub(lambda match: match.group(0).replace(".", "\u0001"), text or "")
+    protected = re.sub(
+        r"(\d)\.(\d)",
+        lambda match: f"{match.group(1)}\u0001{match.group(2)}",
+        protected,
+    )
+    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", protected) if part.strip()]
+    return [part.replace("\u0001", ".") for part in parts] or ([text.strip()] if text and text.strip() else [])
+
+
 def difficulty_metrics(paragraphs: list[str]) -> dict[str, Any]:
     text = " ".join(paragraphs)
     words = re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", text)
-    sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+    sentences = split_reading_sentences(text)
     sentence_lengths = [len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", sentence)) for sentence in sentences]
     complex_markers = len(re.findall(
         r"\b(although|because|while|whereas|which|that|despite|however|therefore|unless|whose)\b",
@@ -424,12 +441,11 @@ class ContentPipeline:
                 stats["requests"] += 1
                 offsets[adapter.policy.id] += per_source
                 if isinstance(result, Exception):
-                    stats.update(
-                        status="failed",
-                        error=f"{type(result).__name__}: {str(result)[:250]}",
-                    )
+                    stats["status"] = "partial" if stats["fetched"] > 0 else "failed"
+                    stats["error"] = f"{type(result).__name__}: {str(result)[:250]}"
                     continue
                 stats["status"] = "ok"
+                stats.pop("error", None)
                 stats["fetched"] += len(result)
                 adapter.client.record_count(adapter.policy.id, len(result))
                 for item in result:

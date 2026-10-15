@@ -24,4 +24,6 @@ backend/data/
 backend/*.db
 backend/.env
 *.log
+gh-logs/
+*age-secret-key*
 qa-*.png

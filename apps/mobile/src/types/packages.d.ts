@@ -1,5 +1,6 @@
 declare module "@soda-reading/core" {
   export const REVIEW_RATINGS: Array<{ id: number; key: string; label: string }>;
+  export function shouldFlushProgressOnAppState(state: string): boolean;
   export function splitSentences(text: string): string[];
   export function tokenizeSentence(text: string): string[];
   export function splitSentenceEnding(text: string): { body: string; ending: string };
@@ -24,6 +25,26 @@ declare module "@soda-reading/core" {
     log: Record<string, unknown>;
   };
   export function newIdempotencyKey(): string;
+  export function hasCommonGloss(result: { translation?: string; commonTranslation?: string; referent?: boolean } | null | undefined): boolean;
+  export function glossText(result: { translation?: string; referent?: boolean } | null | undefined): string;
+  export function vocabularyItemId(contentId: string, word: string, sentence?: string): string;
+  export function savedVocabularySense<T extends { translation?: string; id?: string; word?: string; sentence?: string; contentId?: string; contentHash?: string }>(
+    items: T[] | null | undefined,
+    contentId: string,
+    word: string,
+    sentence?: string,
+  ): T | null;
+  export function isSameVocabularyItem(
+    item: { id?: string; word?: string; sentence?: string; contentId?: string; contentHash?: string } | null | undefined,
+    contentId: string,
+    word: string,
+    sentence?: string,
+  ): boolean;
+  export function articleForLevel<T extends { id?: string; cefr?: string; paragraphs?: string[] }>(
+    live?: T[],
+    library?: T[],
+    level?: string,
+  ): { article: T | null; injected: boolean };
 }
 
 declare module "@soda-reading/api-client" {

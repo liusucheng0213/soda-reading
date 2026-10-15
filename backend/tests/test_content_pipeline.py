@@ -8,7 +8,9 @@ from sqlalchemy import select
 
 from app.content_pipeline import (
     ContentPipeline,
+    difficulty_metrics,
     excerpt_coherence,
+    split_reading_sentences,
     validate_candidate,
 )
 from app.content_editorial import EditorialGateway, EditorialProvider
@@ -42,13 +44,15 @@ def make_candidate(
     content_kind: str = "paper",
     external_id: str | None = None,
     full_text_allowed: bool = False,
+    now: datetime | None = None,
 ) -> RawCandidate:
+    clock = now or datetime.now(timezone.utc)
     return RawCandidate(
         source_id=source_id,
         external_id=external_id or f"candidate-{index}",
         title=f"Researchers report a useful new finding number {index}",
         url=f"https://example.org/research/{index}",
-        published_at=datetime.now(timezone.utc) - timedelta(days=days_old),
+        published_at=clock - timedelta(days=days_old),
         summary=(
             "The research team reports a recent result and explains the evidence, "
             "methods, limitations, and relevance for readers who want reliable information."
@@ -85,21 +89,36 @@ def test_apod_index_pages_are_rejected():
     assert "low_quality_index_or_chrome" in validate_candidate(candidate, datetime.now(timezone.utc))
 
 
+def test_reading_sentences_keep_titles_initials_and_decimals_together():
+    sentences = split_reading_sentences(
+        "Dr. Reed arrived in the U.S. yesterday. It costs 3.14 dollars. She left."
+    )
+    assert sentences == [
+        "Dr. Reed arrived in the U.S. yesterday.",
+        "It costs 3.14 dollars.",
+        "She left.",
+    ]
+    metrics = difficulty_metrics([
+        "Dr. Reed arrived in the U.S. yesterday. She started reading about shade."
+    ])
+    assert metrics["sentenceCount"] == 2
+
+
 def test_freshness_windows_and_complete_excerpt_rules():
     now = datetime.now(timezone.utc)
     assert "older_than_90_days" in validate_candidate(
-        make_candidate(1, days_old=91, content_kind="news"),
+        make_candidate(1, days_old=91, content_kind="news", now=now),
         now,
     )
     assert "older_than_90_days" in validate_candidate(
-        make_candidate(2, days_old=92, content_kind="paper"),
+        make_candidate(2, days_old=92, content_kind="paper", now=now),
         now,
     )
     assert "older_than_365_days" in validate_candidate(
-        make_candidate(3, days_old=367, content_kind="evergreen"),
+        make_candidate(3, days_old=367, content_kind="evergreen", now=now),
         now,
     )
-    novel = make_candidate(4, days_old=4000, content_kind="literature", topic="文化")
+    novel = make_candidate(4, days_old=4000, content_kind="literature", topic="文化", now=now)
     novel.summary = (
         "The research team reports a recent result and explains the evidence, "
         "methods, limitations, and relevance for readers who want reliable information."

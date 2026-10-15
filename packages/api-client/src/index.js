@@ -3,9 +3,63 @@ import {
   newIdempotencyKey,
   newReviewCard,
   scheduleReview,
+  sentenceKey,
   serializeCard,
   usernameToInternalEmail,
+  vocabularyItemId,
 } from "@soda-reading/core";
+
+export function vocabularyRecord(userId, item) {
+  const translation = String(item?.translation || "");
+  return {
+    user_id: userId,
+    content_hash: item.contentHash || item.contentId,
+    content_id: item.contentId,
+    word: item.word,
+    lemma: item.lemma || null,
+    part_of_speech: item.partOfSpeech || null,
+    phonetic: item.phonetic || null,
+    translation,
+    common_translation: String(item.commonTranslation || "").slice(0, 40),
+    referent: Boolean(item.referent) || /^(?:文中)?指代/.test(translation.trim()),
+    sentence: item.sentence,
+    sentence_key: sentenceKey(item.sentence),
+    before_context: item.before || "",
+    after_context: item.after || "",
+  };
+}
+
+export function vocabularyWriteAttempts(record) {
+  const withoutGloss = { ...record };
+  delete withoutGloss.common_translation;
+  delete withoutGloss.referent;
+  const legacy = { ...withoutGloss };
+  delete legacy.sentence_key;
+  return [
+    { record, onConflict: "user_id,content_hash,normalized_word,sentence_key" },
+    { record: withoutGloss, onConflict: "user_id,content_hash,normalized_word,sentence_key" },
+    { record: legacy, onConflict: "user_id,content_hash,normalized_word" },
+  ];
+}
+
+export function vocabularyFromRow(item) {
+  const mapped = {
+    id: vocabularyItemId(item.content_id || item.content_hash, item.word, item.sentence),
+    remoteId: item.id,
+    word: item.word,
+    lemma: item.lemma,
+    partOfSpeech: item.part_of_speech,
+    phonetic: item.phonetic,
+    translation: item.translation,
+    sentence: item.sentence,
+    contentHash: item.content_hash,
+    contentId: item.content_id,
+    card: item.vocabulary_cards?.[0] ?? null,
+  };
+  if (item.common_translation) mapped.commonTranslation = item.common_translation;
+  if (item.referent === true) mapped.referent = true;
+  return mapped;
+}
 
 export class SodaApiError extends Error {
   constructor(message, { code = "REQUEST_FAILED", status = 0, retryable = false } = {}) {
@@ -190,22 +244,15 @@ export function createSodaClient({ url, anonKey, authStorage, fetch: customFetch
     async saveVocabulary(item) {
       const session = await this.session();
       if (!session?.user?.id) throw new SodaApiError("请先登录", { code: "AUTH_REQUIRED" });
-      const record = {
-        user_id: session.user.id,
-        content_hash: item.contentHash || item.contentId,
-        content_id: item.contentId,
-        word: item.word,
-        lemma: item.lemma || null,
-        part_of_speech: item.partOfSpeech || null,
-        phonetic: item.phonetic || null,
-        translation: item.translation,
-        sentence: item.sentence,
-        before_context: item.before || "",
-        after_context: item.after || "",
-      };
-      const { data, error } = await supabase.from("vocabulary_items")
-        .upsert(record, { onConflict: "user_id,content_hash,normalized_word" })
-        .select().single();
+      const record = vocabularyRecord(session.user.id, item);
+      let data = null;
+      let error = null;
+      for (const attempt of vocabularyWriteAttempts(record)) {
+        ({ data, error } = await supabase.from("vocabulary_items")
+          .upsert(attempt.record, { onConflict: attempt.onConflict })
+          .select().single());
+        if (!error) break;
+      }
       if (error) throw new SodaApiError("生词同步失败", { code: "VOCABULARY_SYNC_FAILED", retryable: true });
       const initial = serializeCard(newReviewCard());
       await supabase.from("vocabulary_cards").upsert({
@@ -225,19 +272,7 @@ export function createSodaClient({ url, anonKey, authStorage, fetch: customFetch
       const { data, error } = await supabase.from("vocabulary_items")
         .select("*,vocabulary_cards(*)").order("created_at", { ascending: false });
       if (error) throw new SodaApiError("读取生词失败", { code: "VOCABULARY_LOAD_FAILED", retryable: true });
-      return (data ?? []).map((item) => ({
-        id: `${item.content_id || item.content_hash}:${item.normalized_word}`,
-        remoteId: item.id,
-        word: item.word,
-        lemma: item.lemma,
-        partOfSpeech: item.part_of_speech,
-        phonetic: item.phonetic,
-        translation: item.translation,
-        sentence: item.sentence,
-        contentHash: item.content_hash,
-        contentId: item.content_id,
-        card: item.vocabulary_cards?.[0] ?? null,
-      }));
+      return (data ?? []).map((item) => vocabularyFromRow(item));
     },
 
     async reviewVocabulary(item, rating, now = new Date()) {

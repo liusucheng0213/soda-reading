@@ -1,12 +1,19 @@
 import {
+  glossText,
+  hasCommonGloss,
+  isSameVocabularyItem,
+  savedVocabularySense,
   normalizeWord,
   splitSentenceEnding,
+  shouldFlushProgressOnAppState,
   splitSentences,
   tokenizeSentence,
+  vocabularyItemId,
 } from "@soda-reading/core";
 import { router } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AppState,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -67,6 +74,7 @@ export default function Reader() {
   const [viewportHeight, setViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const progressRef = useRef(0);
+  const progressReady = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
   const restoredRef = useRef(false);
   const wordAbort = useRef<AbortController | null>(null);
@@ -83,13 +91,30 @@ export default function Reader() {
   }, []);
 
   useEffect(() => {
+    if (!article) return;
+    const flush = () => {
+      if (!progressReady.current) return;
+      void saveProgress(article, progressRef.current);
+    };
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (shouldFlushProgressOnAppState(state)) flush();
+    });
+    return () => {
+      subscription.remove();
+      flush();
+    };
+  }, [article, saveProgress]);
+
+  useEffect(() => {
     let live = true;
     restoredRef.current = false;
+    progressReady.current = false;
     setResumeProgress(0);
     if (!article) return () => { live = false; };
     loadLocalProgress(article.contentHash ?? article.id).then((progress) => {
       if (!live) return;
       progressRef.current = progress;
+      progressReady.current = true;
       setResumeProgress(progress);
     });
     return () => { live = false; };
@@ -127,6 +152,25 @@ export default function Reader() {
     wordAbort.current?.abort();
     const controller = new AbortController();
     wordAbort.current = controller;
+    const saved = savedVocabularySense(vocabulary, currentArticle.id, context.word, context.sentence)
+      ?? savedVocabularySense(vocabulary, currentArticle.contentHash ?? "", context.word, context.sentence);
+    if (saved) {
+      setWordState({
+        ...context,
+        status: "success",
+        result: {
+          translation: saved.translation,
+          commonTranslation: saved.commonTranslation,
+          referent: saved.referent,
+          lemma: saved.lemma ?? "",
+          partOfSpeech: saved.partOfSpeech ?? "",
+          phonetic: saved.phonetic ?? "",
+          provider: "vocabulary",
+          cached: true,
+        },
+      });
+      return;
+    }
     setWordState({ ...context, status: "loading" });
     const prepared = preparedWord(currentArticle.glossary, context.word, context.sentence);
     if (prepared?.translation) {
@@ -224,8 +268,10 @@ export default function Reader() {
 
   async function collectWord() {
     if (!wordState?.result || !wordState.word) return;
-    const id = `${currentArticle.id}:${normalizeWord(wordState.word)}`;
-    if (vocabulary.some((item) => item.id === id)) return;
+    const word = wordState.word;
+    const sentence = wordState.sentence ?? "";
+    const id = vocabularyItemId(currentArticle.id, word, sentence);
+    if (vocabulary.some((item) => isSameVocabularyItem(item, currentArticle.id, word, sentence))) return;
     const item: VocabularyItem = {
       id,
       contentHash: currentArticle.contentHash ?? currentArticle.id,
@@ -235,6 +281,8 @@ export default function Reader() {
       before: wordState.before,
       after: wordState.after,
       translation: wordState.result.translation,
+      commonTranslation: wordState.result.commonTranslation || "",
+      referent: Boolean(wordState.result.referent),
       lemma: wordState.result.lemma,
       partOfSpeech: wordState.result.partOfSpeech,
       phonetic: wordState.result.phonetic,
@@ -243,7 +291,7 @@ export default function Reader() {
   }
 
   const collected = wordState?.word
-    ? vocabulary.some((item) => item.id === `${currentArticle.id}:${normalizeWord(wordState.word!)}`)
+    ? vocabulary.some((item) => isSameVocabularyItem(item, currentArticle.id, wordState.word!, wordState.sentence))
     : false;
 
   return (
@@ -274,6 +322,7 @@ export default function Reader() {
           const maximum = nativeEvent.contentSize.height - nativeEvent.layoutMeasurement.height;
           progressRef.current = maximum > 0 ? Math.max(0, Math.min(1, nativeEvent.contentOffset.y / maximum)) : 0;
         }}
+        onScrollEndDrag={() => saveProgress(currentArticle, progressRef.current)}
         onMomentumScrollEnd={() => saveProgress(currentArticle, progressRef.current)}
       >
         <View style={styles.titleBlock}>
@@ -324,8 +373,11 @@ export default function Reader() {
                               style={styles.inlineGloss}
                             >
                               <Text style={[styles.wordTranslation, { color: wordState?.status === "error" ? colors.danger : colors.accentDeep }]}>
-                                {wordState?.status === "loading" ? "翻译中…" : wordState?.status === "error" ? "重试" : wordState?.result?.translation}
+                                {wordState?.status === "loading" ? "翻译中…" : wordState?.status === "error" ? "重试" : glossText(wordState?.result)}
                               </Text>
+                              {wordState?.status === "success" && hasCommonGloss(wordState.result) ? (
+                                <Text style={[styles.wordTranslation, { color: colors.muted }]}>常见 {wordState.result?.commonTranslation}</Text>
+                              ) : null}
                               {wordState?.status === "success" ? (
                                 <Text style={[styles.collectMark, { color: collected ? colors.muted : colors.accentDeep }]}>
                                   {collected ? "✓" : "＋"}
@@ -356,10 +408,6 @@ export default function Reader() {
             })}
           </View>
         ))}
-        <View style={[styles.source, { borderColor: colors.line }]}>
-          <Text style={{ color: colors.accent }}>✓</Text>
-          <View style={{ flex: 1 }}><Text style={{ color: colors.text, fontWeight: "700", fontSize: 12 }}>{currentArticle.source}</Text><Text style={{ marginTop: 6, color: colors.muted, fontSize: 10, lineHeight: 16 }}>正文与 AI 翻译分开呈现。来源和版权策略可追溯。</Text></View>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -388,5 +436,4 @@ const styles = StyleSheet.create({
   collectMark: { fontSize: 10, lineHeight: 13 },
   ending: { minWidth: 44, minHeight: 44, marginLeft: -7, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   sentenceTranslation: { width: "100%", marginTop: 7, marginBottom: 9, paddingVertical: 9, paddingHorizontal: 11, borderLeftWidth: 2, borderRadius: 5 },
-  source: { marginTop: 20, paddingTop: 20, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10 },
 });

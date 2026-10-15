@@ -64,11 +64,16 @@ export function serializeCard(card) {
   };
 }
 
+function dueTime(item) {
+  if (!item?.card?.due) return 0;
+  const time = new Date(item.card.due).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
 export function dueCards(items, limit = 20, now = new Date()) {
-  return [...items]
-    .filter((item) => !item.card?.due || new Date(item.card.due) <= now)
-    .sort((left, right) =>
-      new Date(left.card?.due ?? 0).getTime() - new Date(right.card?.due ?? 0).getTime()
-    )
-    .slice(0, Math.max(10, Math.min(50, limit)));
+  const limitCount = Math.max(10, Math.min(50, Number(limit) || 20));
+  return [...(items || [])]
+    .filter((item) => dueTime(item) <= now.getTime())
+    .sort((left, right) => dueTime(left) - dueTime(right))
+    .slice(0, limitCount);
 }

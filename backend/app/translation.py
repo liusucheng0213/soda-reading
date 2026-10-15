@@ -488,7 +488,8 @@ class TranslationGateway:
         self.inflight[key] = task
         try:
             result = await asyncio.shield(task)
-            await self._cache_set(key, result)
+            if result.get("cacheLayer") != "local":
+                await self._cache_set(key, result)
             return result
         except TranslationUnavailable:
             self.failure_cache[key] = (
@@ -854,7 +855,7 @@ class TranslationGateway:
                 response[field] = value.strip() if isinstance(value, str) else ""
             common = result.get("commonTranslation", "")
             common = common.strip() if isinstance(common, str) else ""
-            referent = bool(result.get("referent")) or translation.startswith("指代")
+            referent = bool(result.get("referent")) or bool(re.match(r"^(?:文中)?指代", translation))
             if referent or common in INVALID_TRANSLATIONS:
                 common = ""
             elif not re.search(r"[\u3400-\u9fff]", common):

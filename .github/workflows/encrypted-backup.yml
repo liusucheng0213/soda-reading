@@ -18,20 +18,36 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Mark job start
-        run: date +%s > /tmp/soda-job-start
-      - name: Validate backup secrets
+      - name: Require a Supabase Postgres URL
+        id: gate
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
           AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
         run: |
-          test -n "$DATABASE_URL"
-          test -n "$AGE_PUBLIC_KEY"
+          case "$DATABASE_URL" in
+            postgres://*|postgresql://*)
+              if [ -z "$AGE_PUBLIC_KEY" ]; then
+                echo "::warning::AGE_PUBLIC_KEY 为空，已跳过备份。"
+                echo "ok=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "ok=true" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+            *)
+              echo "::warning::SUPABASE_DB_URL 不是 Postgres 连接串，已跳过加密备份。请换成 Supabase 的 Direct connection 或 Session pooler URI 后再手动运行。"
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+      - name: Mark job start
+        if: steps.gate.outputs.ok == 'true'
+        run: date +%s > /tmp/soda-job-start
       - name: Install PostgreSQL client and age
+        if: steps.gate.outputs.ok == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client age
       - name: Create and encrypt dump
+        if: steps.gate.outputs.ok == 'true'
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
           AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
@@ -42,13 +58,15 @@ jobs:
           rm backup/soda-reading.dump
           sha256sum backup/soda-reading.dump.age > backup/SHA256SUMS
       - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.ok == 'true'
         with:
           name: soda-reading-backup-${{ github.run_id }}
           path: backup/
           retention-days: 14
           if-no-files-found: error
       - name: Record Action minutes
-        if: always()
+        if: steps.gate.outputs.ok == 'true'
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |

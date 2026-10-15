@@ -1,28 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
   BookOpenText,
   Books,
   BookmarkSimple,
-  CaretLeft,
-  CaretRight,
   CheckCircle,
-  Copy,
   FileArrowUp,
-  Highlighter,
   House,
-  MagnifyingGlass,
   Moon,
-  Pause,
   Plus,
   SpeakerHigh,
   Sun,
-  TextAa,
   UserCircle,
   X,
 } from "@phosphor-icons/react";
 import {
-  contextualDictionary,
   dailyAlternatives,
   defaultReadingPrefs,
   demoArticle,
@@ -40,6 +31,7 @@ import {
   cloudConfigured,
   deleteSyncedVocabulary,
   loadSyncedVocabulary,
+  loadSyncedProgress,
   loginWithPassword,
   logout,
   restoreSession,
@@ -47,23 +39,28 @@ import {
   saveProfile,
   saveSyncedProgress,
   saveSyncedVocabulary,
-  translateSentence,
-  translateWord,
 } from "./lib/api.js";
 import { dueCards, REVIEW_RATINGS, scheduleReview } from "@soda-reading/core";
 import { inspectAndParseFile } from "./lib/importers.js";
-import {
-  annotateTokens,
-  normalizeWord,
-  phraseFromItems,
-  selectionSpan,
-  splitSentenceEnding,
-  splitSentences,
-  tokenizeSentence,
-} from "./lib/reader.js";
-import { listLocalDocuments, persistState, saveLocalDocument, useStoredState } from "./lib/storage.js";
+import { listLocalDocuments, persistState, resolveAccountBase, saveLocalDocument, useStoredState, writeAccountState } from "./lib/storage.js";
 import { AdminApp } from "./AdminApp.jsx";
-import { displayFeed } from "./lib/feed.js";
+import { ReaderScreen } from "./screens/ReaderScreen.jsx";
+import { articleWithBody, displayFeed } from "./lib/feed.js";
+import {
+  applyReadingProgress,
+  freshnessLabel,
+  glossText,
+  isCurrentSave,
+  mergeRemoteProgress,
+  mergeVocabulary,
+  vocabularyRemoteSave,
+  remainingMinutes,
+  resumeFromProgress,
+  shouldFlushProgressOnHide,
+  todayReadMinutes,
+  uniqueArticles,
+  vocabSource,
+} from "./lib/study.js";
 
 const NAV_ITEMS = [
   { id: "home", label: "今日", icon: House },
@@ -72,23 +69,30 @@ const NAV_ITEMS = [
   { id: "profile", label: "我的", icon: UserCircle },
 ];
 
-function hasCommonGloss(result) {
-  return Boolean(
-    result?.commonTranslation
-    && result.commonTranslation !== result.translation
-    && !result?.referent,
-  );
-}
+const EMPTY_LIST = [];
+const EMPTY_PROGRESS = {};
 
-function measureWidth(measure) {
-  return measureOptions.find((item) => item.id === measure)?.width ?? "38em";
-}
+function useAccountState(username, bucket, fallback) {
+  const owner = username || "";
+  const [packet, setPacket] = useState(() => ({
+    owner,
+    value: resolveAccountBase(null, owner, bucket, fallback),
+  }));
+  if (packet.owner !== owner) {
+    setPacket({ owner, value: resolveAccountBase(packet, owner, bucket, fallback) });
+  }
+  const value = resolveAccountBase(packet, owner, bucket, fallback);
 
-function articleWithBody(article) {
-  if (article?.paragraphs?.length) return article;
-  return fallbackLibrary.find((item) => item.id === article?.id)
-    || fallbackLibrary.find((item) => item.cefr === article?.cefr)
-    || article;
+  const update = (next) => {
+    setPacket((current) => {
+      const base = resolveAccountBase(current, owner, bucket, fallback);
+      const resolved = typeof next === "function" ? next(base) : next;
+      if (owner) writeAccountState(owner, bucket, resolved);
+      return { owner, value: resolved };
+    });
+  };
+
+  return [value, update];
 }
 
 function speakEnglish(text) {
@@ -121,46 +125,6 @@ function todayLabel() {
   return `${weekday} · ${monthDay}`;
 }
 
-function remainingMinutes(article, progress = 0) {
-  const total = Math.max(1, Number(article?.readingMinutes) || 5);
-  return Math.max(1, Math.round(total * (1 - Math.min(0.99, progress || 0))));
-}
-
-function highlightId(articleId, keys = []) {
-  return `${articleId}:${keys.join("-")}`;
-}
-
-function freshnessLabel(article) {
-  const raw = article.sourcePublishedAt ?? article.publishedAt;
-  const published = raw ? new Date(raw) : null;
-  if (!published || Number.isNaN(published.getTime())) return "";
-  const age = Math.max(0, Math.floor((Date.now() - published.getTime()) / 86_400_000));
-  if (age === 0) return "今天";
-  if (age === 1) return "昨天";
-  if (age < 30) return `${age} 天前`;
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    month: "numeric",
-    day: "numeric",
-  }).format(published);
-}
-
-function collectFindHits(paragraphs, needle) {
-  const query = needle.trim().toLowerCase();
-  if (!query) return [];
-  const hits = [];
-  (paragraphs ?? []).forEach((paragraph, paragraphIndex) => {
-    splitSentences(paragraph).forEach((sentence, sentenceIndex) => {
-      const { body } = splitSentenceEnding(sentence);
-      annotateTokens(tokenizeSentence(body), `${paragraphIndex}-${sentenceIndex}`).forEach((item) => {
-        if (!item.word) return;
-        if (item.token.toLowerCase().includes(query) || item.word.includes(query)) hits.push(item.key);
-      });
-    });
-  });
-  return hits;
-}
-
 function usePersistentState(key, fallback) {
   const [value, setValue] = useState(() => useStoredState(key, fallback));
   useEffect(() => persistState(key, value), [key, value]);
@@ -184,15 +148,56 @@ function SodaApp() {
   const [syncState, setSyncState] = useState(cloudConfigured ? "正在连接云端…" : "本地开发模式");
   const [theme, setTheme] = usePersistentState("soda.theme", "day");
   const [readingPrefs, setReadingPrefs] = usePersistentState("soda.readingPrefs", defaultReadingPrefs);
-  const [resume, setResume] = usePersistentState("soda.resume", null);
+  const accountName = profile?.username || "";
+  const [resume, setResume] = useAccountState(accountName, "resume", null);
   const [screen, setScreen] = useState("home");
   const [activeArticle, setActiveArticle] = useState(null);
-  const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives });
+  const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives, fallback: true });
   const [documents, setDocuments] = useState([]);
-  const [vocabulary, setVocabulary] = usePersistentState("soda.vocabulary", []);
-  const [highlights, setHighlights] = usePersistentState("soda.highlights", []);
-  const [progress, setProgress] = usePersistentState("soda.progress", {});
+  const [vocabulary, setVocabulary] = useAccountState(accountName, "vocabulary", EMPTY_LIST);
+  const [highlights, setHighlights] = useAccountState(accountName, "highlights", EMPTY_LIST);
+  const [progress, setProgress] = useAccountState(accountName, "progress", EMPTY_PROGRESS);
+  const [readingDay, setReadingDay] = useAccountState(accountName, "readingDay", null);
   const [loginHint, setLoginHint] = useState(null);
+  const [readerFocus, setReaderFocus] = useState(null);
+  const [vocabReviewing, setVocabReviewing] = useState(false);
+  const [vocabRevealed, setVocabRevealed] = useState(false);
+  const [closedArticleId, setClosedArticleId] = useState("");
+  const progressSyncRef = useRef({ timer: 0, payload: null });
+  const profileSaveRef = useRef(0);
+
+  const flushProgressSync = () => {
+    window.clearTimeout(progressSyncRef.current.timer);
+    const payload = progressSyncRef.current.payload;
+    progressSyncRef.current.payload = null;
+    if (!payload) return;
+    saveSyncedProgress(payload).catch(() => setSyncState("阅读进度待同步"));
+  };
+
+  const queueProgressSync = (payload) => {
+    progressSyncRef.current.payload = payload;
+    window.clearTimeout(progressSyncRef.current.timer);
+    progressSyncRef.current.timer = window.setTimeout(flushProgressSync, 600);
+  };
+
+  const flushProgressSyncRef = useRef(flushProgressSync);
+  flushProgressSyncRef.current = flushProgressSync;
+
+  useEffect(() => {
+    const onHide = (event) => {
+      if (shouldFlushProgressOnHide(event)) flushProgressSyncRef.current();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+      window.clearTimeout(progressSyncRef.current.timer);
+      const payload = progressSyncRef.current.payload;
+      progressSyncRef.current.payload = null;
+      if (payload) saveSyncedProgress(payload).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     if (!cloudConfigured) return;
@@ -228,17 +233,48 @@ function SodaApp() {
   }, []);
 
   useEffect(() => {
-    if (!session?.accessToken || profile?.mustChangePassword) return;
-    getDailyFeed(session.accessToken, profile).then(setFeed).catch(() => undefined);
+    const shown = displayFeed(feed, profile, fallbackLibrary);
+    const catalog = uniqueArticles([
+      shown.primary,
+      ...(shown.alternatives ?? []),
+      ...fallbackLibrary,
+      ...documents,
+    ]);
+    const next = resumeFromProgress(catalog, progress, resume);
+    if (!next?.id || next.id === resume?.id) return;
+    setResume(next);
+  }, [feed, profile, documents, progress, resume]);
+
+  useEffect(() => {
+    if (!session?.accessToken || profile?.mustChangePassword) return undefined;
+    let active = true;
+    getDailyFeed(session.accessToken, profile).then((next) => {
+      if (active) setFeed(next);
+    }).catch(() => undefined);
     if (cloudConfigured) {
       loadSyncedVocabulary()
         .then((items) => {
-          if (items) setVocabulary(items);
+          if (!active || !items) return;
+          setVocabulary((current) => mergeVocabulary(current, items));
           setSyncState("云端已同步");
         })
-        .catch(() => setSyncState("离线使用 · 稍后同步"));
+        .catch(() => {
+          if (active) setSyncState("离线使用 · 稍后同步");
+        });
+      loadSyncedProgress()
+        .then((rows) => {
+          if (!active || !rows?.length) return;
+          setProgress((current) => mergeRemoteProgress(current, rows));
+          setSyncState("云端已同步");
+        })
+        .catch(() => {
+          if (active) setSyncState("阅读进度待同步");
+        });
     }
-  }, [session?.accessToken, profile?.mustChangePassword, profile?.level, JSON.stringify(profile?.topics ?? [])]);
+    return () => {
+      active = false;
+    };
+  }, [session?.accessToken, profile?.mustChangePassword]);
 
   const authenticate = ({ session: nextSession, profile: nextProfile }) => {
     setSession(nextSession);
@@ -249,18 +285,24 @@ function SodaApp() {
 
   const updateProfile = (next) => {
     const value = typeof next === "function" ? next(profile) : next;
+    const generation = profileSaveRef.current + 1;
+    profileSaveRef.current = generation;
     setProfile(value);
     setSyncState("正在同步设置…");
     saveProfile(value, session?.accessToken)
       .then(async (saved) => {
+        if (!isCurrentSave(generation, profileSaveRef.current)) return;
         const merged = { ...value, ...saved, onboarded: true };
         setProfile(merged);
         setSyncState(cloudConfigured ? "云端已同步" : "本地已保存");
-        if (session?.accessToken) {
-          setFeed(await getDailyFeed(session.accessToken, merged));
-        }
+        if (!session?.accessToken) return;
+        const nextFeed = await getDailyFeed(session.accessToken, merged);
+        if (!isCurrentSave(generation, profileSaveRef.current)) return;
+        setFeed(nextFeed);
       })
-      .catch(() => setSyncState("设置待同步"));
+      .catch(() => {
+        if (isCurrentSave(generation, profileSaveRef.current)) setSyncState("设置待同步");
+      });
   };
 
   const updateVocabulary = (next) => {
@@ -271,11 +313,19 @@ function SodaApp() {
     for (const item of added) {
       saveSyncedVocabulary(item)
         .then((saved) => {
-          if (!saved) return;
-          setVocabulary((current) => current.map((entry) =>
-            entry.id === item.id ? { ...entry, remoteId: saved.id } : entry
-          ));
-          setSyncState("云端已同步");
+          if (!saved?.id) return;
+          setVocabulary((current) => {
+            const outcome = vocabularyRemoteSave(current, item.id, saved.id);
+            queueMicrotask(() => {
+              if (!outcome.deletedRemoteId) {
+                setSyncState("云端已同步");
+                return;
+              }
+              deleteSyncedVocabulary({ remoteId: outcome.deletedRemoteId })
+                .catch(() => setSyncState("删除待同步"));
+            });
+            return outcome.items;
+          });
         })
         .catch(() => setSyncState("生词待同步"));
     }
@@ -338,42 +388,62 @@ function SodaApp() {
         readingPrefs={readingPrefs}
         onReadingPrefsChange={setReadingPrefs}
         onThemeChange={setTheme}
-        onBack={() => setActiveArticle(null)}
+        onBack={() => {
+          flushProgressSync();
+          setActiveArticle(null);
+          setReaderFocus(null);
+        }}
         vocabulary={vocabulary}
         onVocabularyChange={updateVocabulary}
         highlights={highlights}
         onHighlightsChange={setHighlights}
         progress={progress[activeArticle.id] ?? 0}
+        focus={readerFocus}
+        onFocusConsumed={() => setReaderFocus(null)}
         onProgress={(value) => {
+          const previous = progress[activeArticle.id] ?? 0;
           setProgress((current) => ({ ...current, [activeArticle.id]: value }));
+          setReadingDay((log) => applyReadingProgress(log, activeArticle, previous, value));
           setResume((current) => current ? { ...current, progress: value } : current);
-          saveSyncedProgress({
+          queueProgressSync({
             contentHash: activeArticle.contentHash ?? activeArticle.id,
             contentId: activeArticle.id,
             chapterId: "body",
             location: { progress: value },
             progress: value,
-          }).catch(() => setSyncState("阅读进度待同步"));
+          });
         }}
       />
     );
   }
 
-  const openArticle = (article) => {
-    const body = articleWithBody(article);
-    if (!body?.paragraphs?.length) return;
+  const readMinutes = todayReadMinutes(readingDay);
+  const openArticle = (article, focus) => {
+    const body = articleWithBody(article, fallbackLibrary);
+    if (!body?.paragraphs?.length) {
+      setClosedArticleId(article?.id || "");
+      return;
+    }
+    setClosedArticleId("");
     setResume({
       ...body,
       progress: progress[body.id] ?? 0,
     });
+    setReaderFocus(focus ?? null);
     setActiveArticle(body);
   };
   const resumeProgress = resume ? progress[resume.id] ?? resume.progress ?? 0 : 0;
   const canResume = Boolean(resume?.id && resumeProgress > 0.02 && resumeProgress < 0.96);
   const shownFeed = displayFeed(feed, profile, fallbackLibrary);
+  const catalog = uniqueArticles([
+    shownFeed.primary,
+    ...(shownFeed.alternatives ?? []),
+    ...fallbackLibrary,
+    ...documents,
+  ]);
   return (
     <div className={`responsive-app app-shell theme-${theme}`}>
-      <DesktopNavigation current={screen} onChange={setScreen} profile={profile} />
+      <DesktopNavigation current={screen} onChange={setScreen} profile={profile} readMinutes={readMinutes} />
       <main className="app-content">
         {screen === "home" && (
           <HomeScreen
@@ -382,21 +452,31 @@ function SodaApp() {
             resume={canResume ? { ...resume, progress: resumeProgress } : null}
             onOpen={openArticle}
             onLevelChange={(level) => updateProfile({ ...profile, level })}
+            closedArticleId={closedArticleId}
           />
         )}
         {screen === "library" && (
           <LibraryScreen
             documents={documents}
+            catalog={uniqueArticles([shownFeed.primary, ...(shownFeed.alternatives ?? []), ...fallbackLibrary])}
+            progress={progress}
             onDocumentsChange={setDocuments}
             onOpen={openArticle}
+            closedArticleId={closedArticleId}
           />
         )}
         {screen === "vocabulary" && (
           <VocabularyScreen
             items={vocabulary}
+            catalog={catalog}
             reviewLimit={profile.reviewLimit ?? 20}
             onChange={updateVocabulary}
             onReview={reviewVocabulary}
+            onOpen={openArticle}
+            reviewing={vocabReviewing}
+            revealed={vocabRevealed}
+            onReviewingChange={setVocabReviewing}
+            onRevealedChange={setVocabRevealed}
           />
         )}
         {screen === "profile" && (
@@ -408,6 +488,7 @@ function SodaApp() {
             readingPrefs={readingPrefs}
             onReadingPrefsChange={setReadingPrefs}
             syncState={syncState}
+            readMinutes={readMinutes}
             onLogout={async () => {
               await logout();
               setSession(null);
@@ -422,6 +503,7 @@ function SodaApp() {
         feed={shownFeed}
         documents={documents}
         vocabulary={vocabulary}
+        readMinutes={readMinutes}
       />
       <BottomNavigation current={screen} onChange={setScreen} />
     </div>
@@ -518,7 +600,6 @@ function OnboardingScreen({ onComplete }) {
   const [level, setLevel] = useState("B1");
   const [topics, setTopics] = useState(["科技", "文化"]);
   const [minutes, setMinutes] = useState(10);
-  const [reminder, setReminder] = useState("20:30");
 
   const toggleTopic = (topic) => {
     setTopics((current) => current.includes(topic) ? current.filter((item) => item !== topic) : [...current, topic].slice(-4));
@@ -546,22 +627,21 @@ function OnboardingScreen({ onComplete }) {
       </section>
       <section className="setup-section setting-grid">
         <label>每日目标<select value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="20">20 分钟</option></select></label>
-        <label>提醒时间<input type="time" value={reminder} onChange={(event) => setReminder(event.target.value)} /></label>
       </section>
-      <button className="primary-button setup-submit" onClick={() => onComplete({ onboarded: true, level, topics, minutes, reminder })}>保存并查看今日文章</button>
+      <button className="primary-button setup-submit" onClick={() => onComplete({ onboarded: true, level, topics, minutes })}>保存并查看今日文章</button>
     </div>
   );
 }
 
-function HomeScreen({ profile, feed, resume, onOpen, onLevelChange }) {
+function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticleId }) {
   const primary = feed.primary ?? demoArticle;
-  const alternatives = feed.alternatives ?? dailyAlternatives;
+  const alternatives = feed.alternatives ?? [];
   const intro = primary.introZh || primary.summary;
   const featuredProgress = resume?.id === primary.id ? resume.progress : 0;
   return (
     <section className="screen home-screen">
       <header className="screen-header">
-        <div><span className="eyebrow">{todayLabel()}</span><h1>今日阅读</h1></div>
+        <div><span className="eyebrow">{todayLabel()}</span><h1>{feed.standby ? "备用导读" : "今日阅读"}</h1></div>
         <div className="level-switcher" role="tablist" aria-label="阅读水平">
           {levelOptions.map((option) => (
             <button
@@ -592,26 +672,34 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange }) {
         <button className="reading-cta" onClick={() => onOpen(primary)}>
           {featuredProgress > 0.02 ? "继续阅读" : "开始阅读"} <BookOpenText size={20} />
         </button>
+        {closedArticleId === primary.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
       </article>
-      <div className="section-heading"><h3>也许你还喜欢</h3></div>
-      <div className="article-list">
-        {alternatives.map((article) => (
-          <button className="article-row" key={article.id} onClick={() => onOpen(article)}>
-            <span className="article-topic">{article.topic}</span>
-            <span className="article-row-copy">
-              <strong>{article.title}</strong>
-              {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
-              <small>{[article.source, article.cefr, `${article.readingMinutes} 分钟`, freshnessLabel(article)].filter(Boolean).join(" · ")}</small>
-            </span>
-            <BookOpenText size={20} />
-          </button>
-        ))}
-      </div>
+      {alternatives.length > 0 && (
+        <>
+          <div className="section-heading"><h3>也许你还喜欢</h3></div>
+          <div className="article-list">
+            {alternatives.map((article) => (
+              <div key={article.id}>
+                <button className="article-row" onClick={() => onOpen(article)}>
+                  <span className="article-topic">{article.topic}</span>
+                  <span className="article-row-copy">
+                    <strong>{article.title}</strong>
+                    {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
+                    <small>{[article.source, article.cefr, `${article.readingMinutes} 分钟`, freshnessLabel(article)].filter(Boolean).join(" · ")}</small>
+                  </span>
+                  <BookOpenText size={20} />
+                </button>
+                {closedArticleId === article.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   );
 }
 
-function LibraryScreen({ documents, onDocumentsChange, onOpen }) {
+function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChange, onOpen, closedArticleId }) {
   const inputRef = useRef(null);
   const [importState, setImportState] = useState({ loading: false, message: "", error: "" });
 
@@ -641,17 +729,41 @@ function LibraryScreen({ documents, onDocumentsChange, onOpen }) {
         <span><strong>{importState.loading ? "正在导入…" : "导入书籍"}</strong><small>EPUB · TXT · PDF</small></span>
       </button>
       {(importState.message || importState.error) && <p className={importState.error ? "inline-status error" : "inline-status"}>{importState.error || importState.message}</p>}
+      {catalog.length > 0 && (
+        <>
+          <div className="section-heading"><h3>馆藏</h3><span>{catalog.length} 篇</span></div>
+          <div className="article-list">
+            {catalog.map((article) => (
+              <div key={article.id}>
+                <button className="article-row" onClick={() => onOpen(article)}>
+                  <span className="article-topic">{article.topic ?? "本地"}</span>
+                  <span className="article-row-copy">
+                    <strong>{article.title}</strong>
+                    {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
+                    <small>{[article.source, article.cefr, `${remainingMinutes(article, progress[article.id] ?? 0)} 分钟`].filter(Boolean).join(" · ")}</small>
+                  </span>
+                  <BookOpenText size={20} />
+                </button>
+                {closedArticleId === article.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className="section-heading"><h3>本地</h3><span>{documents.length} 项</span></div>
       {documents.length === 0 ? (
-        <div className="empty-state"><Books size={42} weight="thin" /><h3>书架还是空的</h3></div>
+        <div className="empty-state compact"><Books size={36} weight="thin" /><h3>还没有导入的书</h3></div>
       ) : (
         <div className="book-list">
           {documents.map((document) => (
-            <button className="book-row" key={document.id} onClick={() => onOpen(document)}>
-              <span className="book-mark">{document.fileType.toUpperCase()}</span>
-              <span><strong>{document.title}</strong><small>{document.author} · {document.readingMinutes} 分钟</small></span>
-              <BookOpenText size={20} />
-            </button>
+            <div key={document.id}>
+              <button className="book-row" onClick={() => onOpen(document)}>
+                <span className="book-mark">{document.fileType.toUpperCase()}</span>
+                <span><strong>{document.title}</strong><small>{document.author} · {remainingMinutes(document, progress[document.id] ?? 0)} 分钟</small></span>
+                <BookOpenText size={20} />
+              </button>
+              {closedArticleId === document.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+            </div>
           ))}
         </div>
       )}
@@ -659,11 +771,28 @@ function LibraryScreen({ documents, onDocumentsChange, onOpen }) {
   );
 }
 
-function VocabularyScreen({ items, reviewLimit, onChange, onReview }) {
-  const [reviewing, setReviewing] = useState(false);
-  const [revealed, setRevealed] = useState(false);
+function VocabularyScreen({
+  items,
+  catalog = [],
+  reviewLimit,
+  onChange,
+  onReview,
+  onOpen,
+  reviewing,
+  revealed,
+  onReviewingChange,
+  onRevealedChange,
+}) {
   const queue = useMemo(() => dueCards(items, reviewLimit), [items, reviewLimit]);
   const current = queue[0];
+  const currentSource = vocabSource(catalog, current);
+
+  useEffect(() => {
+    if (reviewing && !current) {
+      onReviewingChange(false);
+      onRevealedChange(false);
+    }
+  }, [reviewing, current, onReviewingChange, onRevealedChange]);
 
   const speak = (word) => {
     if (!("speechSynthesis" in window)) return;
@@ -677,7 +806,7 @@ function VocabularyScreen({ items, reviewLimit, onChange, onReview }) {
     if (!current) return;
     const outcome = scheduleReview(current.card, rating);
     onReview(current, rating, outcome.after);
-    setRevealed(false);
+    onRevealedChange(false);
   };
 
   if (reviewing && current) {
@@ -685,7 +814,7 @@ function VocabularyScreen({ items, reviewLimit, onChange, onReview }) {
       <section className="screen vocabulary-screen review-session">
         <header className="screen-header">
           <div><span className="eyebrow">REVIEW</span><h1>今日复习</h1></div>
-          <button className="text-button" onClick={() => setReviewing(false)}>退出</button>
+          <button className="text-button" onClick={() => { onReviewingChange(false); onRevealedChange(false); }}>退出</button>
         </header>
         <div className="review-progress-line"><span>本轮还剩 {queue.length} 张</span><span>每日上限 {reviewLimit}</span></div>
         <article className="review-card">
@@ -693,15 +822,24 @@ function VocabularyScreen({ items, reviewLimit, onChange, onReview }) {
           <strong>{current.word}</strong>
           <p>{current.sentence}</p>
           {!revealed ? (
-            <button className="primary-button" onClick={() => setRevealed(true)}>显示语境词义</button>
+            <button className="primary-button" onClick={() => onRevealedChange(true)}>显示语境词义</button>
           ) : (
             <>
-              <div className="review-answer"><span>{current.phonetic}</span><em>{current.translation}</em></div>
+              <div className="review-answer"><span>{current.phonetic}</span><em>{glossText(current)}</em></div>
               <div className="review-ratings">
                 {REVIEW_RATINGS.map((rating) => (
                   <button key={rating.id} onClick={() => rate(rating.id)} className={`rating-${rating.key}`}>{rating.label}</button>
                 ))}
               </div>
+              {currentSource && (
+                <button
+                  type="button"
+                  className="source-link"
+                  onClick={() => onOpen(currentSource, { word: current.word, sentence: current.sentence })}
+                >
+                  原文
+                </button>
+              )}
             </>
           )}
         </article>
@@ -715,26 +853,38 @@ function VocabularyScreen({ items, reviewLimit, onChange, onReview }) {
       {items.length > 0 && (
         <div className="review-entry">
           <div><strong>{queue.length} 张待复习</strong></div>
-          <button onClick={() => setReviewing(true)} disabled={!queue.length}>{queue.length ? "开始复习" : "今天已完成"}</button>
+          <button onClick={() => { onReviewingChange(true); onRevealedChange(false); }} disabled={!queue.length}>{queue.length ? "开始复习" : "今天已完成"}</button>
         </div>
       )}
       {items.length === 0 ? (
         <div className="empty-state"><BookmarkSimple size={42} weight="thin" /><h3>还没有生词</h3></div>
       ) : (
         <div className="word-list">
-          {items.map((item) => (
+          {items.map((item) => {
+            const source = vocabSource(catalog, item);
+            return (
             <article className="saved-word" key={item.id}>
               <button aria-label={`删除 ${item.word}`} onClick={() => onChange(items.filter((entry) => entry.id !== item.id))}><X size={18} /></button>
-              <strong>{item.word}</strong><span>{item.phonetic}</span><em>{item.translation}</em><p>{item.sentence}</p>
+              <strong>{item.word}</strong><span>{item.phonetic}</span><em>{glossText(item)}</em><p>{item.sentence}</p>
+              {source && (
+                <button
+                  type="button"
+                  className="source-link"
+                  onClick={() => onOpen(source, { word: item.word, sentence: item.sentence })}
+                >
+                  原文
+                </button>
+              )}
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
   );
 }
 
-function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, readingPrefs, onReadingPrefsChange, syncState, onLogout }) {
+function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, readingPrefs, onReadingPrefsChange, syncState, readMinutes = 0, onLogout }) {
   const prefs = { ...defaultReadingPrefs, ...readingPrefs };
   return (
     <section className="screen profile-screen">
@@ -805,9 +955,9 @@ function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, reading
       </div>
 
       <h3 className="settings-label">节奏</h3>
+      <p className="today-read">今天已读 {readMinutes} / {profile.minutes || 10} 分钟</p>
       <div className="settings-group">
         <label><span>每日目标</span><select value={profile.minutes} onChange={(event) => onProfileChange({ ...profile, minutes: Number(event.target.value) })}><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="20">20 分钟</option></select></label>
-        <label><span>每日提醒</span><input type="time" value={profile.reminder} onChange={(event) => onProfileChange({ ...profile, reminder: event.target.value })} /></label>
         <label><span>每日复习</span><select value={profile.reviewLimit ?? 20} onChange={(event) => onProfileChange({ ...profile, reviewLimit: Number(event.target.value) })}>{[10, 20, 30, 40, 50].map((value) => <option key={value} value={value}>{value} 张</option>)}</select></label>
       </div>
 
@@ -818,7 +968,7 @@ function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, reading
   );
 }
 
-function DesktopNavigation({ current, onChange, profile }) {
+function DesktopNavigation({ current, onChange, profile, readMinutes = 0 }) {
   return (
     <aside className="desktop-navigation">
       <div className="desktop-brand">
@@ -835,13 +985,13 @@ function DesktopNavigation({ current, onChange, profile }) {
       </nav>
       <div className="desktop-level">
         <span>{profile.level}</span>
-        <div><strong>今日目标</strong><small>{profile.minutes} 分钟阅读</small></div>
+        <div><strong>今天已读</strong><small>{readMinutes} / {profile.minutes || 10} 分钟</small></div>
       </div>
     </aside>
   );
 }
 
-function DesktopContextPanel({ screen, profile, feed, documents, vocabulary }) {
+function DesktopContextPanel({ screen, profile, feed, documents, vocabulary, readMinutes = 0 }) {
   const primary = feed.primary ?? demoArticle;
   return (
     <aside className="desktop-context-panel">
@@ -866,7 +1016,7 @@ function DesktopContextPanel({ screen, profile, feed, documents, vocabulary }) {
           <h2>生词</h2>
           <div className="context-stat"><strong>{vocabulary.length}</strong><span>个</span></div>
           {vocabulary.slice(0, 3).map((item) => (
-            <div className="context-word" key={item.id}><strong>{item.word}</strong><span>{item.translation}</span></div>
+            <div className="context-word" key={item.id}><strong>{item.word}</strong><span>{glossText(item)}</span></div>
           ))}
         </>
       )}
@@ -874,7 +1024,7 @@ function DesktopContextPanel({ screen, profile, feed, documents, vocabulary }) {
         <>
           <span className="context-kicker">PROFILE</span>
           <h2>{profile.level} · {levelOptions.find((item) => item.id === profile.level)?.label}</h2>
-          <div className="context-stat"><strong>{profile.minutes}</strong><span>分钟</span></div>
+          <div className="context-stat"><strong>{readMinutes}</strong><span>/ {profile.minutes || 10} 分钟</span></div>
         </>
       )}
     </aside>
@@ -891,749 +1041,3 @@ function BottomNavigation({ current, onChange }) {
   );
 }
 
-function keysInRange(unit, startKey, endKey) {
-  const nodes = [...unit.querySelectorAll("[data-word-key]")];
-  const start = nodes.findIndex((node) => node.dataset.wordKey === startKey);
-  const end = nodes.findIndex((node) => node.dataset.wordKey === endKey);
-  if (start < 0 && end < 0) return [];
-  if (start < 0) return [endKey];
-  if (end < 0) return [startKey];
-  const from = Math.min(start, end);
-  const to = Math.max(start, end);
-  return nodes.slice(from, to + 1).map((node) => node.dataset.wordKey);
-}
-
-function wordContextFromUnit(unit, keys) {
-  const sentence = unit.dataset.sentence || "";
-  const sentenceKey = unit.dataset.sentenceKey || "";
-  const { body } = splitSentenceEnding(sentence);
-  const items = annotateTokens(tokenizeSentence(body), sentenceKey);
-  const span = selectionSpan(items, keys);
-  const wordKeys = span
-    ? items.slice(span.start, span.end + 1).filter((item) => item.word).map((item) => item.key)
-    : keys;
-  return {
-    word: phraseFromItems(items, span) || items.find((item) => item.key === keys[0])?.token || "",
-    sentence,
-    before: unit.dataset.before || "",
-    after: unit.dataset.after || "",
-    key: wordKeys[0] || keys[0],
-    keys: wordKeys,
-    sentenceKey,
-  };
-}
-
-function WordGloss({ status, result, onRetry }) {
-  if (!status || status === "picking") return null;
-  return (
-    <rt className={`word-gloss ${status === "error" ? "error" : status}`} role="status" aria-live="polite">
-      {status === "loading" && "…"}
-      {status === "success" && (
-        <>
-          <span className="word-contextual">{result?.translation}</span>
-          {hasCommonGloss(result) && (
-            <>
-              <br />
-              <span className="word-common">常见 {result.commonTranslation}</span>
-            </>
-          )}
-        </>
-      )}
-      {status === "error" && <button type="button" onClick={onRetry}>重试</button>}
-    </rt>
-  );
-}
-
-function WordUnit({ surface, item, selected, highlighted, marked, hit, current, status, result, onSelect, onRetry }) {
-  const Tag = selected ? "ruby" : "span";
-  return (
-    <Tag className={`word-unit${selected ? " selected" : ""}${highlighted ? " highlighted" : ""}${marked ? " marked" : ""}${hit ? " hit" : ""}${current ? " hit-current" : ""}${selected && hasCommonGloss(result) ? " has-common" : ""}`}>
-      <span
-        className="word-surface"
-        role="button"
-        tabIndex={0}
-        data-word-key={item.key}
-        data-word-surface={surface}
-        onClick={onSelect}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onSelect();
-          }
-        }}
-      >
-        {surface}
-      </span>
-      {selected && <WordGloss status={status} result={result} onRetry={onRetry} />}
-    </Tag>
-  );
-}
-
-function PhraseCluster({ items, status, result, marked, onSelect, onRetry }) {
-  return (
-    <ruby className={`word-cluster selected${marked ? " marked" : ""}${hasCommonGloss(result) ? " has-common" : ""}`}>
-      <span className="word-cluster-words">
-        {items.map((item) => (
-          item.word ? (
-            <span
-              key={item.key}
-              className="word-surface"
-              role="button"
-              tabIndex={0}
-              data-word-key={item.key}
-              data-word-surface={item.token}
-              onClick={onSelect}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onSelect();
-                }
-              }}
-            >
-              {item.token}
-            </span>
-          ) : <span key={item.key}>{item.token}</span>
-        ))}
-      </span>
-      <WordGloss status={status} result={result} onRetry={onRetry} />
-    </ruby>
-  );
-}
-
-function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChange, onThemeChange, onBack, vocabulary, onVocabularyChange, highlights, onHighlightsChange, progress, onProgress }) {
-  const [selectedWord, setSelectedWord] = useState(null);
-  const [selectedSentence, setSelectedSentence] = useState(null);
-  const [sentenceResult, setSentenceResult] = useState(null);
-  const [toolsOpen, setToolsOpen] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [findOpen, setFindOpen] = useState(false);
-  const [findQuery, setFindQuery] = useState("");
-  const [findIndex, setFindIndex] = useState(0);
-  const prefs = { ...defaultReadingPrefs, ...readingPrefs };
-  const scrollRef = useRef(null);
-  const listenRef = useRef(false);
-  const restoredProgress = useRef(false);
-  const wordRequestRef = useRef(null);
-  const sentenceRequestRef = useRef(null);
-  const ignoreClickRef = useRef(false);
-  const pickRef = useRef(null);
-
-  const paragraphs = article.paragraphs?.length ? article.paragraphs : [];
-  const articleHighlights = useMemo(
-    () => (highlights ?? []).filter((item) => item.articleId === article.id),
-    [highlights, article.id],
-  );
-  const markedKeys = useMemo(() => {
-    const keys = new Set();
-    for (const item of articleHighlights) {
-      for (const key of item.keys || []) keys.add(key);
-    }
-    return keys;
-  }, [articleHighlights]);
-  const findHits = useMemo(() => collectFindHits(paragraphs, findQuery), [paragraphs, findQuery]);
-  const hitSet = useMemo(() => new Set(findHits), [findHits]);
-  const currentHit = findHits[Math.min(findIndex, Math.max(0, findHits.length - 1))] || "";
-
-  useEffect(() => {
-    restoredProgress.current = false;
-    const frame = requestAnimationFrame(() => {
-      const element = scrollRef.current;
-      if (element) {
-        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight) * progress;
-      }
-      restoredProgress.current = true;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [article.id]);
-
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key !== "Escape") return;
-      wordRequestRef.current?.abort();
-      sentenceRequestRef.current?.abort();
-      setSelectedWord(null);
-      setSelectedSentence(null);
-      setSentenceResult(null);
-      setToolsOpen(false);
-      setFindOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      wordRequestRef.current?.abort();
-      sentenceRequestRef.current?.abort();
-      listenRef.current = false;
-      window.speechSynthesis?.cancel();
-    };
-  }, []);
-
-  useEffect(() => {
-    const onFind = (event) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
-      event.preventDefault();
-      setFindOpen(true);
-    };
-    window.addEventListener("keydown", onFind);
-    return () => window.removeEventListener("keydown", onFind);
-  }, []);
-
-  useEffect(() => {
-    setFindIndex(0);
-  }, [findQuery, article.id]);
-
-  useEffect(() => {
-    if (!findOpen || !findHits.length) return;
-    const key = findHits[Math.min(findIndex, findHits.length - 1)];
-    const node = scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(key)}"]`);
-    node?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [findOpen, findHits, findIndex]);
-
-  const requestWord = async (context) => {
-    wordRequestRef.current?.abort();
-    const controller = new AbortController();
-    wordRequestRef.current = controller;
-    const keys = context.keys ?? (context.key ? [context.key] : []);
-    const next = { ...context, keys };
-    setSelectedWord({ ...next, status: "loading", result: null, error: "" });
-    const query = context.word.trim();
-    const normalized = query.includes(" ") ? query.toLowerCase() : normalizeWord(query);
-    const prepared = !query.includes(" ") && article.glossary?.find((item) =>
-      normalizeWord(item.word ?? item.lemma ?? "") === normalized &&
-      (!item.sentence || item.sentence === context.sentence)
-    );
-    if (prepared?.translation) {
-      setSelectedWord({ ...next, status: "success", error: "", result: {
-          scope: "word",
-          quality: "contextual",
-          translation: prepared.translation,
-          lemma: prepared.lemma ?? "",
-          partOfSpeech: prepared.partOfSpeech ?? "",
-          phonetic: prepared.phonetic ?? "",
-          provider: "soda-pregenerated",
-          model: "article-edition",
-          cached: true,
-          cacheLayer: "article",
-          latencyMs: 0,
-          providerLatencyMs: 0,
-        },
-      });
-      return;
-    }
-    const preview = !query.includes(" ") ? contextualDictionary[normalized] : null;
-    if (preview) {
-      setSelectedWord({
-        ...next,
-        status: "success",
-        error: "",
-        result: {
-          scope: "word",
-          quality: "basic",
-          ...preview,
-          provider: "local-preview",
-          model: "dictionary",
-          cached: true,
-          cacheLayer: "preview",
-          latencyMs: 0,
-          providerLatencyMs: 0,
-        },
-      });
-    }
-    try {
-      const result = await translateWord({
-        word: normalized || query,
-        sentence: context.sentence,
-        before: context.before,
-        after: context.after,
-        contentHash: article.contentHash ?? article.id,
-        signal: controller.signal,
-      });
-      if (wordRequestRef.current !== controller) return;
-      setSelectedWord({ ...next, status: "success", result, error: "" });
-    } catch (error) {
-      if (error?.name === "AbortError" || wordRequestRef.current !== controller) return;
-      setSelectedWord({
-        ...next,
-        status: "error",
-        result: null,
-        error: "暂时无法翻译，请稍后重试。",
-      });
-    }
-  };
-
-  const handleWord = (context) => {
-    if (ignoreClickRef.current) {
-      ignoreClickRef.current = false;
-      return;
-    }
-    const keys = context.keys ?? [context.key];
-    const already = selectedWord?.keys?.length === keys.length && selectedWord.keys.every((key, index) => key === keys[index]);
-    if (already) {
-      wordRequestRef.current?.abort();
-      setSelectedWord(null);
-      return;
-    }
-    requestWord({ ...context, keys });
-  };
-
-  const finishPick = (event) => {
-    const pick = pickRef.current;
-    if (!pick || event.pointerId !== pick.pointerId) return;
-    pickRef.current = null;
-    try {
-      event.currentTarget.releasePointerCapture?.(pick.pointerId);
-    } catch {
-      /* already released */
-    }
-    window.getSelection()?.removeAllRanges();
-    if (pick.scrolling || !pick.unit || pick.keys.length < 2) return;
-    ignoreClickRef.current = true;
-    window.setTimeout(() => {
-      ignoreClickRef.current = false;
-    }, 320);
-    requestWord(wordContextFromUnit(pick.unit, pick.keys));
-  };
-
-  const requestSentence = async (context) => {
-    sentenceRequestRef.current?.abort();
-    const controller = new AbortController();
-    sentenceRequestRef.current = controller;
-    setSelectedSentence(context.key);
-    setSentenceResult({ ...context, status: "loading", translation: "…", error: "" });
-    try {
-      const result = await translateSentence({
-        sentence: context.sentence,
-        article,
-        before: context.before,
-        after: context.after,
-        contentHash: article.contentHash ?? article.id,
-        signal: controller.signal,
-      });
-      if (sentenceRequestRef.current !== controller) return;
-      setSentenceResult({ ...context, ...result, status: "success", error: "" });
-    } catch (error) {
-      if (error?.name === "AbortError" || sentenceRequestRef.current !== controller) return;
-      setSentenceResult({
-        ...context,
-        status: "error",
-        translation: "",
-        error: "暂时无法翻译，请稍后重试。",
-      });
-    }
-  };
-
-  const handleSentence = (context) => {
-    const { key } = context;
-    if (selectedSentence === key) {
-      sentenceRequestRef.current?.abort();
-      setSelectedSentence(null);
-      setSentenceResult(null);
-      return;
-    }
-    requestSentence(context);
-  };
-
-  const saveSelectedWord = () => {
-    if (!selectedWord?.result) return;
-    const id = `${article.id}:${normalizeWord(selectedWord.word)}`;
-    if (vocabulary.some((entry) => entry.id === id)) return;
-    onVocabularyChange([...vocabulary, {
-      id,
-      contentHash: article.contentHash ?? article.id,
-      contentId: article.id,
-      word: selectedWord.word,
-      sentence: selectedWord.sentence,
-      before: selectedWord.before,
-      after: selectedWord.after,
-      ...selectedWord.result,
-    }]);
-  };
-
-  const selectedHighlightId = selectedWord?.keys?.length ? highlightId(article.id, selectedWord.keys) : "";
-  const selectedIsMarked = articleHighlights.some((item) => item.id === selectedHighlightId);
-  const articleWords = vocabulary.filter((item) => (item.contentId ?? item.contentHash) === article.id || (item.contentId ?? item.contentHash) === (article.contentHash ?? article.id));
-  const needle = findQuery.trim();
-  const leftMinutes = remainingMinutes(article, progress);
-
-  const toggleHighlight = () => {
-    if (!selectedWord?.keys?.length) return;
-    const id = highlightId(article.id, selectedWord.keys);
-    if (selectedIsMarked) {
-      onHighlightsChange((highlights ?? []).filter((item) => item.id !== id));
-      return;
-    }
-    onHighlightsChange([...(highlights ?? []), {
-      id,
-      articleId: article.id,
-      word: selectedWord.word,
-      keys: selectedWord.keys,
-      sentence: selectedWord.sentence,
-    }]);
-  };
-
-  const copySentence = async (text) => {
-    const value = text || selectedWord?.sentence || "";
-    if (!value) return;
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      /* clipboard may be blocked */
-    }
-  };
-
-  const jumpToKey = (key) => {
-    if (!key) return;
-    const node = scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(key)}"]`);
-    node?.scrollIntoView({ block: "center", behavior: "smooth" });
-  };
-
-  const stopListening = () => {
-    listenRef.current = false;
-    window.speechSynthesis?.cancel();
-    setListening(false);
-  };
-
-  const toggleListening = () => {
-    if (!("speechSynthesis" in window)) return;
-    if (listening) {
-      stopListening();
-      return;
-    }
-    window.speechSynthesis.cancel();
-    listenRef.current = true;
-    setListening(true);
-    const queue = [...paragraphs];
-    const next = () => {
-      if (!listenRef.current || queue.length === 0) {
-        setListening(false);
-        listenRef.current = false;
-        return;
-      }
-      const utterance = new SpeechSynthesisUtterance(queue.shift());
-      utterance.lang = "en-US";
-      utterance.rate = 0.92;
-      utterance.onend = next;
-      utterance.onerror = stopListening;
-      window.speechSynthesis.speak(utterance);
-    };
-    next();
-  };
-
-  return (
-    <div
-      className={`reader-screen theme-${theme} typeface-${prefs.typeface}`}
-      style={{
-        "--reader-scale": prefs.fontScale,
-        "--reader-leading": prefs.lineHeight,
-        "--reader-measure": measureWidth(prefs.measure),
-      }}
-    >
-      <aside className="reader-desktop-nav">
-        <button className="reader-back-link" onClick={onBack}><ArrowLeft size={19} />返回</button>
-        <div className="reader-desktop-brand">苏打阅读<small>SODA READING</small></div>
-        <div className="reader-book-info">
-          <span>{article.topic ?? "本地内容"} · {article.cefr ?? "自定义"}</span>
-          <h1>{article.title}</h1>
-          <p>{article.author ?? article.source}</p>
-        </div>
-        <div className="reader-chapter">
-          <span>还剩</span>
-          <strong>{leftMinutes} 分钟</strong>
-        </div>
-        <div className="reader-side-progress">
-          <span><strong>{Math.round(progress * 100)}%</strong></span>
-          <div><i style={{ width: `${progress * 100}%` }} /></div>
-        </div>
-      </aside>
-      <section className="reader-main">
-        <header className="reader-header">
-          <button className="reader-icon mobile-reader-back" onClick={onBack} aria-label="返回"><ArrowLeft size={24} /></button>
-          <span className="reader-brand">苏打阅读</span>
-          <div className="reader-progress" aria-label={`还剩 ${leftMinutes} 分钟`}><span>{leftMinutes} 分钟</span><div><i style={{ width: `${progress * 100}%` }} /></div></div>
-          <button className={`reader-icon${listening ? " listening" : ""}`} onClick={toggleListening} aria-label={listening ? "停止朗读" : "朗读全文"}>{listening ? <Pause size={22} /> : <SpeakerHigh size={22} />}</button>
-          <button className={`reader-icon${findOpen ? " listening" : ""}`} onClick={() => setFindOpen((value) => !value)} aria-label="查找"><MagnifyingGlass size={22} /></button>
-          <button className="reader-icon" onClick={() => onThemeChange(theme === "night" ? "day" : theme === "sepia" ? "night" : "sepia")} aria-label="切换纸色">{theme === "night" ? <Moon size={22} /> : <Sun size={22} />}</button>
-          <button className="reader-icon" onClick={() => setToolsOpen((value) => !value)} aria-label="阅读设置"><TextAa size={23} /></button>
-        </header>
-        {findOpen && (
-          <div className="reader-find">
-            <MagnifyingGlass size={16} />
-            <input
-              className="find-input"
-              value={findQuery}
-              onChange={(event) => setFindQuery(event.target.value)}
-              placeholder="查找"
-              aria-label="在文章中查找"
-              autoFocus
-            />
-            <span>{needle ? `${findHits.length ? Math.min(findIndex, findHits.length - 1) + 1 : 0}/${findHits.length}` : ""}</span>
-            <button type="button" disabled={!findHits.length} onClick={() => setFindIndex((value) => (value - 1 + findHits.length) % findHits.length)} aria-label="上一处"><CaretLeft size={16} /></button>
-            <button type="button" disabled={!findHits.length} onClick={() => setFindIndex((value) => (value + 1) % findHits.length)} aria-label="下一处"><CaretRight size={16} /></button>
-            <button type="button" onClick={() => { setFindOpen(false); setFindQuery(""); }} aria-label="关闭查找"><X size={16} /></button>
-          </div>
-        )}
-        {toolsOpen && (
-          <div className={`reader-tools${findOpen ? " with-find" : ""}`}>
-            <div className="tool-row" role="group" aria-label="字体">
-              {typefaceOptions.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={prefs.typeface === item.id ? "selected" : ""}
-                  onClick={() => onReadingPrefsChange({ ...prefs, typeface: item.id })}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-            <div className="tool-row">
-              <span>字号</span>
-              <button type="button" onClick={() => onReadingPrefsChange({ ...prefs, fontScale: Math.max(0.9, Number((prefs.fontScale - 0.06).toFixed(2))) })}>A−</button>
-              <button type="button" onClick={() => onReadingPrefsChange({ ...prefs, fontScale: Math.min(1.28, Number((prefs.fontScale + 0.06).toFixed(2))) })}>A+</button>
-              <span>行距</span>
-              {lineHeightOptions.map((item) => (
-                <button key={item.id} type="button" className={prefs.lineHeight === item.id ? "selected" : ""} onClick={() => onReadingPrefsChange({ ...prefs, lineHeight: item.id })}>{item.label}</button>
-              ))}
-              <span>栏宽</span>
-              {measureOptions.map((item) => (
-                <button key={item.id} type="button" className={prefs.measure === item.id ? "selected" : ""} onClick={() => onReadingPrefsChange({ ...prefs, measure: item.id })}>{item.label}</button>
-              ))}
-            </div>
-            <div className="tool-row">
-              <button type="button" onClick={toggleHighlight} disabled={!selectedWord?.keys?.length} className={selectedIsMarked ? "selected" : ""}>
-                <Highlighter size={16} />划线
-              </button>
-              <button type="button" onClick={() => copySentence()} disabled={!selectedWord?.sentence}><Copy size={16} />复制</button>
-              <button type="button" onClick={saveSelectedWord} disabled={!selectedWord?.result}><BookmarkSimple size={16} />收藏</button>
-            </div>
-          </div>
-        )}
-        <article
-          ref={scrollRef}
-          className={`reader-scroll${toolsOpen ? " tools-open" : ""}${findOpen ? " find-open" : ""}`}
-          onPointerDown={(event) => {
-            if (event.pointerType === "mouse" && event.button !== 0) return;
-            const node = event.target.closest("[data-word-key]");
-            if (!node) return;
-            const unit = node.closest(".sentence-unit");
-            if (!unit) return;
-            pickRef.current = {
-              pointerId: event.pointerId,
-              x: event.clientX,
-              y: event.clientY,
-              unit,
-              startKey: node.dataset.wordKey,
-              keys: [node.dataset.wordKey],
-              dragging: false,
-              scrolling: false,
-            };
-          }}
-          onPointerMove={(event) => {
-            const pick = pickRef.current;
-            if (!pick || event.pointerId !== pick.pointerId || pick.scrolling) return;
-            const dx = event.clientX - pick.x;
-            const dy = event.clientY - pick.y;
-            if (!pick.dragging && Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) + 4) {
-              pick.scrolling = true;
-              return;
-            }
-            if (Math.hypot(dx, dy) < 10) return;
-            pick.dragging = true;
-            try {
-              event.currentTarget.setPointerCapture(pick.pointerId);
-            } catch {
-              /* capture is optional */
-            }
-            const node = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-word-key]");
-            if (!node) return;
-            const unit = node.closest(".sentence-unit");
-            if (unit !== pick.unit) return;
-            const keys = keysInRange(unit, pick.startKey, node.dataset.wordKey);
-            if (keys.length < 2 || keys.join() === pick.keys.join()) return;
-            pick.keys = keys;
-            setSelectedWord({ ...wordContextFromUnit(unit, keys), status: "picking", result: null, error: "" });
-          }}
-          onPointerUp={finishPick}
-          onPointerCancel={finishPick}
-          onClick={(event) => {
-            if (!event.target.closest("[data-word-key], .sentence-dot, .sentence-translation, a")) {
-              wordRequestRef.current?.abort();
-              setSelectedWord(null);
-            }
-          }}
-          onScroll={(event) => {
-            if (!restoredProgress.current) return;
-            const element = event.currentTarget;
-            const ratio = element.scrollTop / Math.max(1, element.scrollHeight - element.clientHeight);
-            if (Math.abs(ratio - progress) > 0.05) onProgress(Math.min(1, Math.max(0, ratio)));
-          }}
-        >
-          <div className="reader-title-block"><span>{article.topic ?? "本地内容"} · {article.cefr}</span><h1>{article.title}</h1></div>
-          {paragraphs.map((paragraph, paragraphIndex) => {
-            const sentences = splitSentences(paragraph);
-            const previousSentences = paragraphIndex > 0 ? splitSentences(paragraphs[paragraphIndex - 1]) : [];
-            const nextSentences = paragraphIndex < paragraphs.length - 1 ? splitSentences(paragraphs[paragraphIndex + 1]) : [];
-            return (
-              <p className="reader-paragraph" key={`${article.id}-${paragraphIndex}`}>
-                {sentences.map((sentence, sentenceIndex) => {
-                  const sentenceKey = `${paragraphIndex}-${sentenceIndex}`;
-                  const { body: sentenceBody, ending: sentenceEnding } = splitSentenceEnding(sentence);
-                  const before = sentences[sentenceIndex - 1] ?? previousSentences.at(-1) ?? "";
-                  const after = sentences[sentenceIndex + 1] ?? nextSentences[0] ?? "";
-                  return (
-                    <span
-                      className="sentence-unit"
-                      key={sentenceKey}
-                      data-sentence={sentence}
-                      data-before={before}
-                      data-after={after}
-                      data-sentence-key={sentenceKey}
-                    >
-                      <span className="sentence-text">
-                        {(() => {
-                          const items = annotateTokens(tokenizeSentence(sentenceBody), sentenceKey);
-                          const span = selectedWord?.sentenceKey === sentenceKey && selectedWord?.keys
-                            ? selectionSpan(items, selectedWord.keys)
-                            : null;
-                          const collapsing = Boolean(
-                            span
-                            && span.end > span.start
-                            && selectedWord?.status
-                            && selectedWord.status !== "picking"
-                          );
-                          return items.map((item, tokenIndex) => {
-                            if (collapsing && tokenIndex > span.start && tokenIndex <= span.end) return null;
-                            if (collapsing && tokenIndex === span.start) {
-                              const slice = items.slice(span.start, span.end + 1);
-                              const context = {
-                                word: phraseFromItems(items, span) || item.token,
-                                sentence,
-                                before,
-                                after,
-                                key: item.key,
-                                keys: slice.filter((entry) => entry.word).map((entry) => entry.key),
-                                sentenceKey,
-                              };
-                              return (
-                                <PhraseCluster
-                                  key={item.key}
-                                  items={slice}
-                                  status={selectedWord.status}
-                                  result={selectedWord.result}
-                                  marked={slice.some((entry) => markedKeys.has(entry.key))}
-                                  onSelect={() => handleWord(context)}
-                                  onRetry={() => requestWord(selectedWord)}
-                                />
-                              );
-                            }
-                            if (!item.word) return <span key={item.key}>{item.token}</span>;
-                            const context = {
-                              word: item.token,
-                              sentence,
-                              before,
-                              after,
-                              key: item.key,
-                              keys: [item.key],
-                              sentenceKey,
-                            };
-                            const inSpan = Boolean(span && tokenIndex >= span.start && tokenIndex <= span.end);
-                            const single = selectedWord?.keys?.length === 1 && selectedWord.keys[0] === item.key;
-                            return (
-                              <WordUnit
-                                key={item.key}
-                                surface={item.token}
-                                item={item}
-                                selected={single && selectedWord.status !== "picking"}
-                                highlighted={inSpan}
-                                marked={markedKeys.has(item.key)}
-                                hit={hitSet.has(item.key)}
-                                current={item.key === currentHit}
-                                status={single ? selectedWord.status : ""}
-                                result={single ? selectedWord.result : null}
-                                onSelect={() => handleWord(context)}
-                                onRetry={() => requestWord(context)}
-                              />
-                            );
-                          });
-                        })()}
-                      </span>
-                      {"\u2060"}
-                      <button
-                        className={selectedSentence === sentenceKey ? "sentence-dot active" : "sentence-dot"}
-                        onClick={() => handleSentence({ sentence, before, after, key: sentenceKey })}
-                        aria-label="显示或隐藏整句翻译"
-                        aria-pressed={selectedSentence === sentenceKey}
-                      ><span aria-hidden="true">{sentenceEnding}</span></button>
-                      {" "}
-                      {selectedSentence === sentenceKey && (
-                        <span className={`sentence-translation ${sentenceResult?.status ?? "loading"}`} role="status" aria-live="polite">
-                          {sentenceResult?.status === "error" ? (
-                            <><span>{sentenceResult.error}</span><button onClick={() => requestSentence(sentenceResult)}>重试</button></>
-                          ) : sentenceResult?.translation}
-                          {sentenceResult?.status === "success" && (
-                            <button type="button" className="sentence-copy" onClick={() => copySentence(sentence)} aria-label="复制原句"><Copy size={14} /></button>
-                          )}
-                        </span>
-                      )}
-                    </span>
-                  );
-                })}
-              </p>
-            );
-          })}
-        </article>
-      </section>
-      <aside className="reader-study-panel">
-        <span className="context-kicker">THIS PIECE</span>
-        <h2>{article.title}</h2>
-        {selectedWord?.status === "loading" && <div className="study-loading">翻译中…</div>}
-        {selectedWord?.status === "error" && (
-          <div className="study-error">
-            <strong>{selectedWord.word}</strong>
-            <p>{selectedWord.error}</p>
-            <button onClick={() => requestWord(selectedWord)}>重新翻译</button>
-          </div>
-        )}
-        {selectedWord?.result && (
-          <div className="study-word-card">
-            <div><strong>{selectedWord.word}</strong><span>{selectedWord.result.phonetic}</span></div>
-            <em>{selectedWord.result.referent ? "文中指代" : "语境义"} {selectedWord.result.translation}</em>
-            {hasCommonGloss(selectedWord.result) && (
-              <p className="study-common">常见义 {selectedWord.result.commonTranslation}</p>
-            )}
-            <dl>
-              <div><dt>原形</dt><dd>{selectedWord.result.lemma || "—"}</dd></div>
-              <div><dt>词性</dt><dd>{selectedWord.result.partOfSpeech || "—"}</dd></div>
-            </dl>
-            <p>{selectedWord.sentence}</p>
-            <div className="study-actions">
-              <button type="button" onClick={toggleHighlight} className={selectedIsMarked ? "selected" : ""}><Highlighter size={18} />划线</button>
-              <button type="button" onClick={() => copySentence()}><Copy size={18} />复制</button>
-              <button onClick={saveSelectedWord} disabled={vocabulary.some((entry) => entry.id === `${article.id}:${normalizeWord(selectedWord.word)}`)}>
-                <BookmarkSimple size={18} />{vocabulary.some((entry) => entry.id === `${article.id}:${normalizeWord(selectedWord.word)}`) ? "已收藏" : "收藏"}
-              </button>
-            </div>
-          </div>
-        )}
-        {!selectedWord && (
-          <>
-            <div className="study-recent">
-              <span>划线</span>
-              {articleHighlights.map((item) => (
-                <button type="button" className="study-jump" key={item.id} onClick={() => jumpToKey(item.keys?.[0])}>
-                  <strong>{item.word}</strong>
-                  <span>{item.sentence}</span>
-                </button>
-              ))}
-            </div>
-            <div className="study-recent">
-              <span>生词</span>
-              {articleWords.map((item) => (
-                <div key={item.id}><strong>{item.word}</strong><span>{item.translation}</span></div>
-              ))}
-            </div>
-          </>
-        )}
-      </aside>
-    </div>
-  );
-}

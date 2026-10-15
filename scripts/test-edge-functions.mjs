@@ -121,6 +121,7 @@ try {
     source_candidate_id: ids.candidate,
     title: `Prepared article ${index + 1}`,
     summary: "验证预生成翻译与每日推荐。",
+    intro_zh: "给首页看的中文导读。",
     paragraphs: [baseSentence, "The article has a complete and calm conclusion."],
     sentence_translations: {
       [baseSentence]: "读者无需等待模型即可验证这个句子。",
@@ -139,7 +140,7 @@ try {
     word_count: 380,
     reading_minutes: 3,
     topic: index === 1 ? "文化" : "科技",
-    content_mode: "editorial_digest",
+    content_mode: index === 2 ? "original_excerpt" : "editorial_digest",
     quality_score: 90,
     source_published_at: publishedAt,
     sources: [{ label: "test", url: "https://example.test/evidence", publishedAt }],
@@ -164,6 +165,10 @@ try {
   assert.equal(feed.data.primary.sentenceTranslations[baseSentence], "读者无需等待模型即可验证这个句子。");
   assert.equal(feed.data.primary.glossary[0].translation, "核验");
   assert.equal(feed.data.alternatives.length, 2);
+  const pieces = [feed.data.primary, ...feed.data.alternatives];
+  assert.ok(pieces.every((item) => item.introZh === "给首页看的中文导读。"));
+  assert.equal(pieces.find((item) => item.contentMode === "original_excerpt").source, "test");
+  assert.equal(pieces.find((item) => item.contentMode === "editorial_digest").source, "苏打阅读编写");
 
   const unavailable = await call("translate", readerAuth.token, {
     body: {
