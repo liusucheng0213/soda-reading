@@ -8,6 +8,8 @@ import {
   remainingReadingMinutes,
   selectionSpan,
   spokenProgress,
+  shouldFlushProgressOnAppState,
+  speechChunks,
   splitSentenceEnding,
   splitSentences,
   tokenizeSentence,
@@ -15,9 +17,43 @@ import {
 } from "./reader.js";
 
 describe("reader text processing", () => {
+  it("splits a long spoken sentence into chunks that still cover the original words", () => {
+    expect(speechChunks("Short sentence.")).toEqual([{ text: "Short sentence.", start: 0 }]);
+    const text = `${"alpha ".repeat(30)}omega.`;
+    const chunks = speechChunks(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.text.length <= 120)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join(" ")).toBe(text.trim());
+    expect(chunks[1].start).toBeGreaterThan(chunks[0].text.length);
+  });
+
+  it("saves reading progress when the app leaves the foreground", () => {
+    expect(shouldFlushProgressOnAppState("background")).toBe(true);
+    expect(shouldFlushProgressOnAppState("inactive")).toBe(true);
+    expect(shouldFlushProgressOnAppState("active")).toBe(false);
+  });
+
   it("keeps abbreviations and sentence endings usable for translation markers", () => {
-    const sentences = splitSentences("Dr. Reed arrived. She started reading!");
-    expect(sentences.at(-1)).toBe("She started reading!");
+    expect(splitSentences("Dr. Reed arrived. She started reading!")).toEqual([
+      "Dr. Reed arrived.",
+      "She started reading!",
+    ]);
+    expect(splitSentences("The U.S. policy changed. It costs 3.14 dollars.")).toEqual([
+      "The U.S. policy changed.",
+      "It costs 3.14 dollars.",
+    ]);
+    expect(splitSentences("J. K. Rowling wrote it. She stopped.")).toEqual([
+      "J. K. Rowling wrote it.",
+      "She stopped.",
+    ]);
+    expect(splitSentences("She bought pens, etc. Then she left.")).toEqual([
+      "She bought pens, etc.",
+      "Then she left.",
+    ]);
+    expect(splitSentences("See Fig. 2. No. 12 is the bus.")).toEqual([
+      "See Fig. 2.",
+      "No. 12 is the bus.",
+    ]);
   });
 
   it("tokenizes apostrophes and hyphenated words", () => {

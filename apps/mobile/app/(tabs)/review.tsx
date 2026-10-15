@@ -1,4 +1,4 @@
-import { dueCards, REVIEW_RATINGS } from "@soda-reading/core";
+import { dueCards, glossText, REVIEW_RATINGS } from "@soda-reading/core";
 import * as Speech from "expo-speech";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -36,7 +36,7 @@ export default function Review() {
             <PrimaryButton onPress={() => setRevealed(true)}>显示语境词义</PrimaryButton>
           ) : (
             <>
-              <View style={styles.answer}><Text style={{ color: colors.muted, fontSize: 12 }}>{current.phonetic}</Text><Text style={[styles.translation, { color: colors.accentDeep }]}>{current.translation}</Text></View>
+              <View style={styles.answer}><Text style={{ color: colors.muted, fontSize: 12 }}>{current.phonetic}</Text><Text style={[styles.translation, { color: colors.accentDeep }]}>{glossText(current)}</Text></View>
               <View style={styles.ratings}>
                 {REVIEW_RATINGS.map((rating) => (
                   <Pressable key={rating.id} disabled={busy} onPress={() => rate(rating.id)} style={[styles.rating, { borderColor: colors.line }]}>
@@ -66,7 +66,7 @@ export default function Review() {
           <View key={item.id} style={[styles.saved, { borderColor: colors.line }]}>
             <Pressable accessibilityLabel={`删除 ${item.word}`} onPress={() => removeWord(item)} hitSlop={10} style={styles.delete}><Text style={{ color: colors.muted }}>×</Text></Pressable>
             <Text style={[styles.savedWord, { color: colors.text }]}>{item.word}<Text style={{ color: colors.muted, fontFamily: undefined, fontSize: 11 }}>　{item.phonetic}</Text></Text>
-            <Text style={{ color: colors.accentDeep, marginTop: 7, fontSize: 13 }}>{item.translation}</Text>
+            <Text style={{ color: colors.accentDeep, marginTop: 7, fontSize: 13 }}>{glossText(item)}</Text>
             <Text style={[styles.savedSentence, { color: colors.muted }]}>{item.sentence}</Text>
           </View>
         ))}

@@ -18,9 +18,16 @@ type Article = {
   difficulty_metrics: Record<string, unknown>;
   source_published_at: string;
   sources: Array<{ label: string; url: string; publishedAt?: string }>;
+  intro_zh?: string;
   published_at: string | null;
   created_at: string;
 };
+
+function articleSource(article: Article): string {
+  const label = article.sources?.[0]?.label;
+  if (article.content_mode !== "editorial_digest" && label) return label;
+  return "苏打阅读编写";
+}
 
 function shanghaiDate(offsetDays = 0): string {
   const shifted = new Date(Date.now() + offsetDays * 86_400_000);
@@ -67,7 +74,7 @@ function serialize(article: Article, recommendationScore: number, reason: string
     id: article.id,
     title: article.title,
     author: article.author,
-    source: "苏打阅读编写",
+    source: articleSource(article),
     sourceMode: article.content_mode,
     contentMode: article.content_mode,
     sourceUrl: sources[0]?.url ?? "",
@@ -77,6 +84,7 @@ function serialize(article: Article, recommendationScore: number, reason: string
     readingMinutes: article.reading_minutes,
     topic: article.topic,
     summary: article.summary,
+    introZh: String(article.intro_zh || article.summary || ""),
     paragraphs: article.paragraphs,
     sentenceTranslations: article.sentence_translations ?? {},
     glossary: article.glossary ?? [],
@@ -152,7 +160,8 @@ Deno.serve(async (request) => {
       score(left, context.profile, recentIds, usedTopics)
     );
     const exact = sorted.filter((article) => article.cefr === context.profile.cefr);
-    const pool = exact.length >= 3 ? exact : sorted;
+    const rest = sorted.filter((article) => article.cefr !== context.profile.cefr);
+    const pool = [...exact, ...rest];
     const selected: Article[] = [];
     for (const article of pool) {
       if (selected.length >= 3) break;

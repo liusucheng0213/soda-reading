@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwise,
   ArrowLeft,
@@ -25,12 +25,14 @@ import {
   typefaceOptions,
 } from "../data.js";
 import { peekWordTranslation, translateSentence, translateWord } from "../lib/api.js";
+import { isSameVocabularyItem, vocabularyItemId } from "@soda-reading/core";
 import {
   annotateTokens,
   flattenSentences,
   normalizeWord,
   phraseFromItems,
   selectionSpan,
+  speechChunks,
   spokenProgress,
   splitSentenceEnding,
   splitSentences,
@@ -39,14 +41,22 @@ import {
 } from "../lib/reader.js";
 import {
   collectFindHits,
+  clickKeepsAnnotation,
   copyText,
+  glossText,
   hasCommonGloss,
+  isReferentGloss,
   highlightId,
+  keepShownGloss,
+  canUseSpeech,
+  resumeSpeechIfStuck,
   listenHotkeyBlocked,
   locateWordInArticle,
   markedRun,
   measureWidth,
   remainingMinutes,
+  pendingReadingOffset,
+  shouldRestoreReadingOffset,
   vocabMatch,
   wordContextAt,
 } from "../lib/study.js";
@@ -83,35 +93,41 @@ function wordContextFromUnit(unit, keys) {
   };
 }
 
-function WordGloss({ status, result, onRetry }) {
+function WordGloss({ status, result, onRetry, saved, marked, onSave, onHighlight }) {
   if (!status || status === "picking") return null;
   return (
-    <rt className={`word-gloss ${status === "error" ? "error" : status}`} role="status" aria-live="polite">
-      {status === "loading" && "…"}
+    <rt className={`word-gloss ${status === "error" ? "error" : status}`}>
+      {status === "loading" && <span role="status">…</span>}
       {status === "success" && (
         <>
-          <span className="word-contextual">{result?.translation}</span>
+          <span className="word-contextual" role="status" aria-live="polite">{glossText(result)}</span>
           {hasCommonGloss(result) && (
-            <>
-              <br />
-              <span className="word-common">常见 {result.commonTranslation}</span>
-            </>
+            <span className="word-common">常见 {result.commonTranslation}</span>
+          )}
+          {result && (
+            <span className="gloss-actions">
+              <button type="button" onClick={onSave} disabled={saved} aria-pressed={saved}>{saved ? "已收藏" : "收藏"}</button>
+              <button type="button" onClick={onHighlight} className={marked ? "selected" : ""} aria-pressed={marked}>{marked ? "已划线" : "划线"}</button>
+            </span>
           )}
         </>
       )}
-      {status === "error" && <button type="button" onClick={onRetry}>重试</button>}
+      {status === "error" && <button type="button" onClick={onRetry} aria-live="polite">重试</button>}
     </rt>
   );
 }
 
-function WordUnit({ surface, item, selected, highlighted, marked, saved, hit, current, listen, status, result, onSelect, onRetry }) {
+function WordUnit({ surface, item, selected, highlighted, marked, saved, hit, current, status, result, onSelect, onRetry, onSave, onHighlight, actionSaved, actionMarked }) {
   const Tag = selected ? "ruby" : "span";
+  const annotated = selected && status && status !== "picking";
   return (
-    <Tag className={`word-unit${selected ? " selected" : ""}${highlighted ? " highlighted" : ""}${marked ? " marked" : ""}${saved ? " saved" : ""}${hit ? " hit" : ""}${current ? " hit-current" : ""}${listen ? " listen-word" : ""}${selected && hasCommonGloss(result) ? " has-common" : ""}`}>
+    <Tag className={`word-unit${selected ? " selected" : ""}${annotated ? " annotated" : ""}${annotated && status === "success" ? " has-actions" : ""}${highlighted ? " highlighted" : ""}${marked ? " marked" : ""}${saved ? " saved" : ""}${hit ? " hit" : ""}${current ? " hit-current" : ""}${annotated && hasCommonGloss(result) ? " has-common" : ""}`}>
       <span
         className="word-surface"
         role="button"
         tabIndex={0}
+        aria-pressed={selected}
+        aria-expanded={selected}
         data-word-key={item.key}
         data-word-surface={surface}
         onClick={onSelect}
@@ -124,12 +140,22 @@ function WordUnit({ surface, item, selected, highlighted, marked, saved, hit, cu
       >
         {surface}
       </span>
-      {selected && <WordGloss status={status} result={result} onRetry={onRetry} />}
+      {selected && (
+        <WordGloss
+          status={status}
+          result={result}
+          onRetry={onRetry}
+          saved={actionSaved}
+          marked={actionMarked}
+          onSave={onSave}
+          onHighlight={onHighlight}
+        />
+      )}
     </Tag>
   );
 }
 
-function MarkedCluster({ items, listenWordKey, hitSet, currentHit, savedSet, onSelect }) {
+function MarkedCluster({ items, hitSet, currentHitSet, savedSet, onSelect }) {
   return (
     <span className="word-cluster marked">
       <span className="word-cluster-words">
@@ -137,7 +163,7 @@ function MarkedCluster({ items, listenWordKey, hitSet, currentHit, savedSet, onS
           item.word ? (
             <span
               key={item.key}
-              className={`word-surface${savedSet.has(item.word) ? " saved" : ""}${item.key === listenWordKey ? " listen-word" : ""}${hitSet.has(item.key) ? " hit" : ""}${item.key === currentHit ? " hit-current" : ""}`}
+              className={`word-surface${savedSet.has(item.word) ? " saved" : ""}${hitSet.has(item.key) ? " hit" : ""}${currentHitSet.has(item.key) ? " hit-current" : ""}`}
               role="button"
               tabIndex={0}
               data-word-key={item.key}
@@ -159,9 +185,9 @@ function MarkedCluster({ items, listenWordKey, hitSet, currentHit, savedSet, onS
   );
 }
 
-function PhraseCluster({ items, status, result, marked, onSelect, onRetry }) {
+function PhraseCluster({ items, status, result, marked, onSelect, onRetry, onSave, onHighlight, saved, actionMarked }) {
   return (
-    <ruby className={`word-cluster selected${marked ? " marked" : ""}${hasCommonGloss(result) ? " has-common" : ""}`}>
+    <ruby className={`word-cluster selected${status && status !== "picking" ? " annotated" : ""}${status === "success" ? " has-actions" : ""}${marked ? " marked" : ""}${status && status !== "picking" && hasCommonGloss(result) ? " has-common" : ""}`}>
       <span className="word-cluster-words">
         {items.map((item) => (
           item.word ? (
@@ -170,6 +196,8 @@ function PhraseCluster({ items, status, result, marked, onSelect, onRetry }) {
               className="word-surface"
               role="button"
               tabIndex={0}
+              aria-pressed
+              aria-expanded
               data-word-key={item.key}
               data-word-surface={item.token}
               onClick={onSelect}
@@ -185,7 +213,15 @@ function PhraseCluster({ items, status, result, marked, onSelect, onRetry }) {
           ) : <span key={item.key}>{item.token}</span>
         ))}
       </span>
-      <WordGloss status={status} result={result} onRetry={onRetry} />
+      <WordGloss
+        status={status}
+        result={result}
+        onRetry={onRetry}
+        saved={saved}
+        marked={actionMarked}
+        onSave={onSave}
+        onHighlight={onHighlight}
+      />
     </ruby>
   );
 }
@@ -197,7 +233,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const [toolsOpen, setToolsOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [listenIndex, setListenIndex] = useState(-1);
-  const [listenWordKey, setListenWordKey] = useState("");
+  const listenWordKeyRef = useRef("");
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
@@ -207,12 +243,37 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const listenRef = useRef(false);
   const listenCursorRef = useRef(-1);
   const listenGenRef = useRef(0);
+  const listenKeepAliveRef = useRef(0);
   const listenRateRef = useRef(Number(prefs.listenRate) || 1);
   const restoredProgress = useRef(false);
+  const userMovedRef = useRef(false);
+  const applyingScrollRef = useRef(false);
+  const ignoreProgressRestoreRef = useRef(false);
+  const articleIdRef = useRef(article.id);
   const wordRequestRef = useRef(null);
   const sentenceRequestRef = useRef(null);
   const ignoreClickRef = useRef(false);
   const pickRef = useRef(null);
+
+  const paintListenWord = (key) => {
+    const root = scrollRef.current;
+    if (!root) return;
+    root.querySelectorAll(".listen-word").forEach((node) => node.classList.remove("listen-word"));
+    if (!key) return;
+    const surface = root.querySelector(`[data-word-key="${CSS.escape(key)}"]`);
+    if (!surface) return;
+    if (surface.closest(".word-cluster")) surface.classList.add("listen-word");
+    else surface.closest(".word-unit")?.classList.add("listen-word");
+  };
+
+  const moveListenWord = (key) => {
+    listenWordKeyRef.current = key || "";
+    paintListenWord(listenWordKeyRef.current);
+  };
+
+  useLayoutEffect(() => {
+    paintListenWord(listenWordKeyRef.current);
+  });
 
   const paragraphs = article.paragraphs?.length ? article.paragraphs : [];
   const spoken = useMemo(() => flattenSentences(paragraphs), [paragraphs]);
@@ -239,24 +300,82 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     }
     return keys;
   }, [articleHighlights]);
-  const findHits = useMemo(() => collectFindHits(paragraphs, findQuery), [paragraphs, findQuery]);
-  const hitSet = useMemo(() => new Set(findHits), [findHits]);
-  const currentHit = findHits[Math.min(findIndex, Math.max(0, findHits.length - 1))] || "";
+  const findMatches = useMemo(() => collectFindHits(paragraphs, findQuery), [paragraphs, findQuery]);
+  const hitSet = useMemo(() => new Set(findMatches.flat()), [findMatches]);
+  const currentMatch = findMatches[Math.min(findIndex, Math.max(0, findMatches.length - 1))] || [];
+  const currentHit = currentMatch[0] || "";
+  const currentHitSet = useMemo(() => new Set(currentMatch), [currentMatch]);
+
+  const reportProgress = (value) => {
+    if (value === progress) return;
+    ignoreProgressRestoreRef.current = true;
+    onProgress(value);
+  };
 
   useEffect(() => {
-    restoredProgress.current = false;
-    const frame = requestAnimationFrame(() => {
-      const element = scrollRef.current;
-      if (element && !focus?.word && !focus?.sentence) {
-        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight) * progress;
-      }
+    const articleChanged = articleIdRef.current !== article.id;
+    articleIdRef.current = article.id;
+    if (articleChanged) userMovedRef.current = false;
+    const ownWrite = !articleChanged && ignoreProgressRestoreRef.current;
+    ignoreProgressRestoreRef.current = false;
+    if (!shouldRestoreReadingOffset({
+      articleChanged,
+      ownWrite,
+      userMoved: userMovedRef.current,
+      hasFocus: Boolean(focus?.word || focus?.sentence),
+    })) {
       restoredProgress.current = true;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [article.id]);
+      return;
+    }
+    const element = scrollRef.current;
+    if (!element) {
+      restoredProgress.current = true;
+      return undefined;
+    }
+    restoredProgress.current = false;
+    let settled = false;
+    let timer = 0;
+    const finish = () => {
+      timer = window.setTimeout(() => {
+        applyingScrollRef.current = false;
+        restoredProgress.current = true;
+      }, 60);
+    };
+    const apply = () => {
+      if (settled || userMovedRef.current) return;
+      const node = scrollRef.current;
+      if (!node) return;
+      const target = pendingReadingOffset(node.scrollHeight, node.clientHeight, progress);
+      if (target == null) return;
+      settled = true;
+      observer?.disconnect();
+      applyingScrollRef.current = true;
+      node.scrollTop = target;
+      finish();
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply);
+    observer?.observe(element);
+    apply();
+    document.fonts?.ready?.then(() => {
+      if (!settled) apply();
+    }).catch(() => undefined);
+    const giveUp = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      observer?.disconnect();
+      restoredProgress.current = true;
+    }, 1500);
+    return () => {
+      settled = true;
+      observer?.disconnect();
+      window.clearTimeout(timer);
+      window.clearTimeout(giveUp);
+    };
+  }, [article.id, progress, focus?.word, focus?.sentence]);
 
   useEffect(() => {
     if (!focus?.word && !focus?.sentence) return;
+    userMovedRef.current = true;
     const located = locateWordInArticle(paragraphs, focus);
     const context = wordContextAt(paragraphs, located);
     const frame = requestAnimationFrame(() => {
@@ -286,26 +405,28 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       const findNext = event.key === "F3" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g");
       if (!findOpen || !findNext) return;
       event.preventDefault();
-      if (!findHits.length) return;
+      if (!findMatches.length) return;
       const dir = event.shiftKey ? -1 : 1;
-      setFindIndex((value) => (value + dir + findHits.length) % findHits.length);
+      setFindIndex((value) => (value + dir + findMatches.length) % findMatches.length);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [findOpen, findHits.length]);
+  }, [findOpen, findMatches.length]);
 
   useEffect(() => {
     listenGenRef.current += 1;
     listenRef.current = false;
+    clearListenKeepAlive();
     window.speechSynthesis?.cancel();
     setListening(false);
     setListenIndex(-1);
-    setListenWordKey("");
+    moveListenWord("");
     return () => {
       wordRequestRef.current?.abort();
       sentenceRequestRef.current?.abort();
       listenGenRef.current += 1;
       listenRef.current = false;
+      clearListenKeepAlive();
       window.speechSynthesis?.cancel();
     };
   }, [article.id]);
@@ -326,18 +447,17 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   }, [findQuery, article.id]);
 
   useEffect(() => {
-    if (!findOpen || !findHits.length) return;
-    const key = findHits[Math.min(findIndex, findHits.length - 1)];
-    const node = scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(key)}"]`);
+    if (!findOpen || !currentHit) return;
+    const node = scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(currentHit)}"]`);
     node?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [findOpen, findHits, findIndex]);
+  }, [findOpen, currentHit]);
 
   useEffect(() => {
     listenRef.current = false;
     window.speechSynthesis?.cancel();
     setListening(false);
     setListenIndex(-1);
-    setListenWordKey("");
+    moveListenWord("");
     listenCursorRef.current = -1;
   }, [article.id]);
 
@@ -352,8 +472,9 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
 
   useEffect(() => {
     if (!listening || listenIndex < 0 || !spoken.length) return;
-    onProgress(spokenProgress(listenIndex, spoken.length));
-  }, [listenIndex, listening, spoken.length]);
+    const next = spokenProgress(listenIndex, spoken.length);
+    if (next > progress) reportProgress(next);
+  }, [listenIndex, listening, spoken.length, progress]);
 
   const requestWord = async (context) => {
     wordRequestRef.current?.abort();
@@ -364,7 +485,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     setSelectedWord({ ...next, status: "loading", result: null, error: "" });
     const query = context.word.trim();
     const normalized = query.includes(" ") ? query.toLowerCase() : normalizeWord(query);
-    const remembered = vocabMatch(vocabulary, query, context.sentence);
+    const remembered = vocabMatch(vocabulary, query, context.sentence, { exact: true });
     if (remembered?.translation) {
       setSelectedWord({
         ...next,
@@ -452,12 +573,12 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       setSelectedWord({ ...next, status: "success", result, error: "" });
     } catch (error) {
       if (error?.name === "AbortError" || wordRequestRef.current !== controller) return;
-      setSelectedWord({
+      setSelectedWord((current) => keepShownGloss(current, {
         ...next,
         status: "error",
         result: null,
         error: "暂时无法翻译，请稍后重试。",
-      });
+      }));
     }
   };
 
@@ -535,8 +656,8 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
 
   const saveSelectedWord = () => {
     if (!selectedWord?.result) return;
-    const id = `${article.id}:${normalizeWord(selectedWord.word)}`;
-    if (vocabulary.some((entry) => entry.id === id)) return;
+    const id = vocabularyItemId(article.id, selectedWord.word, selectedWord.sentence);
+    if (vocabulary.some((entry) => isSameVocabularyItem(entry, article.id, selectedWord.word, selectedWord.sentence))) return;
     onVocabularyChange([...vocabulary, {
       id,
       contentHash: article.contentHash ?? article.id,
@@ -551,6 +672,10 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
 
   const selectedHighlightId = selectedWord?.keys?.length ? highlightId(article.id, selectedWord.keys) : "";
   const selectedIsMarked = articleHighlights.some((item) => item.id === selectedHighlightId);
+  const selectedIsSaved = Boolean(
+    selectedWord?.word
+    && vocabulary.some((entry) => isSameVocabularyItem(entry, article.id, selectedWord.word, selectedWord.sentence)),
+  );
   const articleWords = vocabulary.filter((item) => (item.contentId ?? item.contentHash) === article.id || (item.contentId ?? item.contentHash) === (article.contentHash ?? article.id));
   const needle = findQuery.trim();
   const listenRatio = spokenProgress(listenIndex, spoken.length);
@@ -588,12 +713,18 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     node?.scrollIntoView({ block: "center", behavior: "smooth" });
   };
 
+  const clearListenKeepAlive = () => {
+    window.clearInterval(listenKeepAliveRef.current);
+    listenKeepAliveRef.current = 0;
+  };
+
   const stopListening = (reset = false) => {
     listenGenRef.current += 1;
     listenRef.current = false;
+    clearListenKeepAlive();
     window.speechSynthesis?.cancel();
     setListening(false);
-    setListenWordKey("");
+    moveListenWord("");
     if (reset) {
       setListenIndex(-1);
       listenCursorRef.current = -1;
@@ -624,31 +755,43 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     listenGenRef.current = gen;
     window.speechSynthesis.cancel();
     listenRef.current = true;
+    clearListenKeepAlive();
+    listenKeepAliveRef.current = window.setInterval(() => {
+      if (!listenRef.current) {
+        clearListenKeepAlive();
+        return;
+      }
+      resumeSpeechIfStuck(window.speechSynthesis);
+    }, 10000);
     setListening(true);
     setListenIndex(start);
-    setListenWordKey("");
+    moveListenWord("");
     listenCursorRef.current = start;
 
-    const speakAt = (index) => {
+    const speakAt = (index, chunkIndex = 0) => {
       if (listenGenRef.current !== gen || !listenRef.current) return;
       const item = items[index];
       if (!item) {
         listenRef.current = false;
+        clearListenKeepAlive();
         setListening(false);
-        setListenWordKey("");
+        moveListenWord("");
         setListenIndex(-1);
         listenCursorRef.current = -1;
-        onProgress(1);
+        reportProgress(1);
         return;
       }
-      const utterance = new SpeechSynthesisUtterance(item.text);
+      const chunks = speechChunks(item.text);
+      const chunk = chunks[chunkIndex] ?? { text: item.text, start: 0 };
+      const utterance = new SpeechSynthesisUtterance(chunk.text);
       utterance.lang = "en-US";
       utterance.rate = Number(listenRateRef.current) || 1;
       utterance.onstart = () => {
         if (listenGenRef.current !== gen || !listenRef.current) return;
         listenCursorRef.current = index;
         setListenIndex(index);
-        setListenWordKey("");
+        if (chunkIndex > 0) return;
+        moveListenWord("");
         const root = scrollRef.current;
         const node = root?.querySelector(`[data-sentence-key="${CSS.escape(item.key)}"]`);
         if (!root || !node) return;
@@ -660,15 +803,20 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       };
       utterance.onboundary = (event) => {
         if (listenGenRef.current !== gen || !listenRef.current || event.name !== "word") return;
-        const key = wordKeyAtChar(item.key, item.text, event.charIndex);
-        if (key) setListenWordKey(key);
+        const key = wordKeyAtChar(item.key, item.text, chunk.start + event.charIndex);
+        if (key && key !== listenWordKeyRef.current) moveListenWord(key);
       };
       utterance.onend = () => {
         if (listenGenRef.current !== gen || !listenRef.current) return;
+        if (chunkIndex + 1 < chunks.length) {
+          speakAt(index, chunkIndex + 1);
+          return;
+        }
         if (once) {
           listenRef.current = false;
+          clearListenKeepAlive();
           setListening(false);
-          setListenWordKey("");
+          moveListenWord("");
           return;
         }
         speakAt(index + 1);
@@ -734,6 +882,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     startListening(selected >= 0 ? selected : visibleSentenceIndex());
   };
 
+  const canListen = canUseSpeech();
   const listenDock = listening || listenIndex >= 0;
 
   useEffect(() => {
@@ -799,16 +948,18 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
         </div>
       </aside>
       <section className="reader-main">
-        <header className="reader-header">
+        <header className={`reader-header${canListen ? "" : " no-speech"}`}>
           <button className="reader-icon mobile-reader-back" onClick={onBack} aria-label="返回"><ArrowLeft size={24} /></button>
-          <span className="reader-brand">苏打阅读</span>
+          <span className="reader-piece-title">{article.title}</span>
           <div className="reader-progress" aria-label={`还剩 ${leftMinutes} 分钟`}><span>{leftMinutes} 分钟</span><div><i style={{ width: `${effectiveProgress * 100}%` }} /></div></div>
           <button
-            className={`reader-icon${listenDock ? " listening" : ""}`}
+            className={`reader-icon${listenDock ? " listening" : ""}${canListen ? "" : " speech-unavailable"}`}
             onClick={toggleListening}
-            aria-label={listening ? "暂停朗读" : listenIndex >= 0 ? "继续朗读" : "朗读全文"}
+            disabled={!canListen}
+            aria-label={canListen ? (listening ? "暂停朗读" : listenIndex >= 0 ? "继续朗读" : "朗读全文") : "这台设备不能朗读"}
+            title={canListen ? undefined : "这台设备不能朗读"}
           >
-            {listening ? <Pause size={22} /> : listenIndex >= 0 ? <Play size={22} /> : <SpeakerHigh size={22} />}
+            {canListen ? (listening ? <Pause size={22} /> : listenIndex >= 0 ? <Play size={22} /> : <SpeakerHigh size={22} />) : <span className="speech-unavailable-label">不能朗读</span>}
           </button>
           <button
             className={`reader-icon${findOpen ? " listening" : ""}`}
@@ -838,17 +989,17 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
               onKeyDown={(event) => {
                 if (event.key !== "Enter") return;
                 event.preventDefault();
-                if (!findHits.length) return;
+                if (!findMatches.length) return;
                 const dir = event.shiftKey ? -1 : 1;
-                setFindIndex((value) => (value + dir + findHits.length) % findHits.length);
+                setFindIndex((value) => (value + dir + findMatches.length) % findMatches.length);
               }}
               placeholder="查找"
               aria-label="在文章中查找"
               autoFocus
             />
-            <span>{needle ? (findHits.length ? `${Math.min(findIndex, findHits.length - 1) + 1}/${findHits.length}` : "无结果") : ""}</span>
-            <button type="button" disabled={!findHits.length} onClick={() => setFindIndex((value) => (value - 1 + findHits.length) % findHits.length)} aria-label="上一处"><CaretLeft size={16} /></button>
-            <button type="button" disabled={!findHits.length} onClick={() => setFindIndex((value) => (value + 1) % findHits.length)} aria-label="下一处"><CaretRight size={16} /></button>
+            <span>{needle ? (findMatches.length ? `${Math.min(findIndex, findMatches.length - 1) + 1}/${findMatches.length}` : "无结果") : ""}</span>
+            <button type="button" disabled={!findMatches.length} onClick={() => setFindIndex((value) => (value - 1 + findMatches.length) % findMatches.length)} aria-label="上一处"><CaretLeft size={16} /></button>
+            <button type="button" disabled={!findMatches.length} onClick={() => setFindIndex((value) => (value + 1) % findMatches.length)} aria-label="下一处"><CaretRight size={16} /></button>
             <button type="button" onClick={() => { setFindOpen(false); setFindQuery(""); }} aria-label="关闭查找"><X size={16} /></button>
           </div>
         )}
@@ -972,16 +1123,18 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
           onPointerUp={finishPick}
           onPointerCancel={finishPick}
           onClick={(event) => {
-            if (!event.target.closest("[data-word-key], .sentence-dot, .sentence-translation, a")) {
+            if (!clickKeepsAnnotation(event.target)) {
               wordRequestRef.current?.abort();
               setSelectedWord(null);
             }
           }}
           onScroll={(event) => {
-            if (!restoredProgress.current) return;
+            if (!restoredProgress.current || applyingScrollRef.current) return;
             const element = event.currentTarget;
             const ratio = element.scrollTop / Math.max(1, element.scrollHeight - element.clientHeight);
-            if (Math.abs(ratio - progress) > 0.05) onProgress(Math.min(1, Math.max(0, ratio)));
+            if (Math.abs(ratio - progress) <= 0.05) return;
+            userMovedRef.current = true;
+            reportProgress(Math.min(1, Math.max(0, ratio)));
           }}
         >
           <div className="reader-title-block"><span>{article.topic ?? "本地内容"} · {article.cefr}</span><h1>{article.title}</h1></div>
@@ -1052,8 +1205,18 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
                                   status={selectedWord.status}
                                   result={selectedWord.result}
                                   marked={slice.some((entry) => markedKeys.has(entry.key))}
+                                  saved={selectedIsSaved}
+                                  actionMarked={selectedIsMarked}
                                   onSelect={() => handleWord(context)}
                                   onRetry={() => requestWord(selectedWord)}
+                                  onSave={(event) => {
+                                    event.stopPropagation();
+                                    saveSelectedWord();
+                                  }}
+                                  onHighlight={(event) => {
+                                    event.stopPropagation();
+                                    toggleHighlight();
+                                  }}
                                 />
                               );
                             }
@@ -1064,9 +1227,8 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
                                 <MarkedCluster
                                   key={item.key}
                                   items={items.slice(run.start, run.end + 1)}
-                                  listenWordKey={listenWordKey}
                                   hitSet={hitSet}
-                                  currentHit={currentHit}
+                                  currentHitSet={currentHitSet}
                                   savedSet={savedSet}
                                   onSelect={(entry) => handleWord({
                                     word: entry.token,
@@ -1102,12 +1264,21 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
                                 marked={markedKeys.has(item.key)}
                                 saved={savedSet.has(item.word)}
                                 hit={hitSet.has(item.key)}
-                                current={item.key === currentHit}
-                                listen={item.key === listenWordKey}
+                                current={currentHitSet.has(item.key)}
                                 status={single ? selectedWord.status : ""}
                                 result={single ? selectedWord.result : null}
                                 onSelect={() => handleWord(context)}
                                 onRetry={() => requestWord(context)}
+                                actionSaved={selectedIsSaved}
+                                actionMarked={selectedIsMarked}
+                                onSave={(event) => {
+                                  event.stopPropagation();
+                                  saveSelectedWord();
+                                }}
+                                onHighlight={(event) => {
+                                  event.stopPropagation();
+                                  toggleHighlight();
+                                }}
                               />
                             );
                           });
@@ -1153,7 +1324,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
         {selectedWord?.result && (
           <div className="study-word-card">
             <div><strong>{selectedWord.word}</strong><span>{selectedWord.result.phonetic}</span></div>
-            <em>{selectedWord.result.referent ? "文中指代" : "语境义"} {selectedWord.result.translation}</em>
+            <em>{isReferentGloss(selectedWord.result) ? glossText(selectedWord.result) : `语境义 ${selectedWord.result.translation}`}</em>
             {hasCommonGloss(selectedWord.result) && (
               <p className="study-common">常见义 {selectedWord.result.commonTranslation}</p>
             )}
@@ -1165,8 +1336,8 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             <div className="study-actions">
               <button type="button" onClick={toggleHighlight} className={selectedIsMarked ? "selected" : ""}><Highlighter size={18} />划线</button>
               <button type="button" onClick={() => copySentence()}><Copy size={18} />{copied || "复制"}</button>
-              <button onClick={saveSelectedWord} disabled={vocabulary.some((entry) => entry.id === `${article.id}:${normalizeWord(selectedWord.word)}`)}>
-                <BookmarkSimple size={18} />{vocabulary.some((entry) => entry.id === `${article.id}:${normalizeWord(selectedWord.word)}`) ? "已收藏" : "收藏"}
+              <button onClick={saveSelectedWord} disabled={selectedIsSaved}>
+                <BookmarkSimple size={18} />{selectedIsSaved ? "已收藏" : "收藏"}
               </button>
             </div>
             {selectedWord?.sentenceKey && (
@@ -1202,7 +1373,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
                   }}
                 >
                   <strong>{item.word}</strong>
-                  <span>{item.translation}</span>
+                  <span>{glossText(item)}</span>
                 </button>
               ))}
             </div>

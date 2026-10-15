@@ -8,7 +8,9 @@ from sqlalchemy import select
 
 from app.content_pipeline import (
     ContentPipeline,
+    difficulty_metrics,
     excerpt_coherence,
+    split_reading_sentences,
     validate_candidate,
 )
 from app.content_editorial import EditorialGateway, EditorialProvider
@@ -83,6 +85,21 @@ def test_apod_index_pages_are_rejected():
     candidate.title = "APOD: 2026 September 20 – Analemma over the Callanish Stones"
     candidate.url = "https://apod.nasa.gov/apod/ap260920.html"
     assert "low_quality_index_or_chrome" in validate_candidate(candidate, datetime.now(timezone.utc))
+
+
+def test_reading_sentences_keep_titles_initials_and_decimals_together():
+    sentences = split_reading_sentences(
+        "Dr. Reed arrived in the U.S. yesterday. It costs 3.14 dollars. She left."
+    )
+    assert sentences == [
+        "Dr. Reed arrived in the U.S. yesterday.",
+        "It costs 3.14 dollars.",
+        "She left.",
+    ]
+    metrics = difficulty_metrics([
+        "Dr. Reed arrived in the U.S. yesterday. She started reading about shade."
+    ])
+    assert metrics["sentenceCount"] == 2
 
 
 def test_freshness_windows_and_complete_excerpt_rules():

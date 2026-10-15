@@ -208,8 +208,16 @@ async def save_progress(payload: ProgressRequest, user: dict = Depends(current_u
 async def save_vocabulary(payload: VocabularyRequest, user: dict = Depends(current_user)) -> dict:
     items = vocabulary_store.setdefault(user["id"], [])
     item = payload.model_dump()
-    if not any(existing["contentId"] == item["contentId"] and existing["word"].lower() == item["word"].lower() for existing in items):
+    same = next((
+        index for index, existing in enumerate(items)
+        if existing["contentId"] == item["contentId"]
+        and existing["word"].lower() == item["word"].lower()
+        and existing.get("sentence", "") == item.get("sentence", "")
+    ), None)
+    if same is None:
         items.append(item)
+    else:
+        items[same] = item
     return {"saved": True, "count": len(items), "item": item}
 
 

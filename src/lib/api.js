@@ -177,6 +177,11 @@ export async function loadSyncedVocabulary() {
   return await cloudClient.loadVocabulary();
 }
 
+export async function loadSyncedProgress() {
+  if (!cloudClient) return null;
+  return await cloudClient.loadProgress();
+}
+
 export async function saveSyncedVocabulary(item) {
   if (!cloudClient) return null;
   return await cloudClient.saveVocabulary(item);
@@ -231,10 +236,14 @@ async function request(path, options = {}) {
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (externalSignal?.aborted) throw new DOMException("Request cancelled", "AbortError");
+    const translation = path.startsWith("/translations/");
     if (error?.name === "AbortError" || error?.name === "TimeoutError") {
-      throw new ApiError("翻译请求超时，请重试", { code: "REQUEST_TIMEOUT", retryable: true });
+      throw new ApiError(translation ? "翻译请求超时，请重试" : "请求超时，请重试", {
+        code: "REQUEST_TIMEOUT",
+        retryable: true,
+      });
     }
-    throw new ApiError("无法连接翻译服务，请检查后端是否已启动", {
+    throw new ApiError(translation ? "无法连接翻译服务，请检查后端是否已启动" : "无法连接服务，请检查后端是否已启动", {
       code: "NETWORK_ERROR",
       retryable: true,
     });
@@ -532,17 +541,15 @@ export async function translateWord({ word, sentence, before = "", after = "", c
         const normalized = word.toLowerCase();
         const entry = contextualDictionary[normalized];
         if (entry) {
-          const result = {
+          return {
             scope: "word",
             quality: "basic",
             ...entry,
             provider: "local-corpus",
             model: "dictionary",
-            cached: true,
+            cached: false,
             latencyMs: 0,
           };
-          rememberTranslation(key, result);
-          return result;
         }
         throw error;
       }

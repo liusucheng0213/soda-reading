@@ -26,8 +26,9 @@ type ProviderHealth = {
   circuit_open_until: string | null;
 };
 
-const PROMPT_VERSION = "translation-context-v3";
-const PLACEHOLDERS = new Set(["语境释义", "中文释义", "翻译", "未知"]);
+const PROMPT_VERSION = "word-referent-v6";
+const PLACEHOLDERS = new Set(["语境释义", "中文释义", "翻译", "未知", ""]);
+const BARE_PRONOUN_GLOSSES = new Set(["它", "它们", "这些", "那些", "这个", "那个", "他", "她", "其"]);
 
 function normalized(value = ""): string {
   return value.replace(/\s+/g, " ").trim();
@@ -127,13 +128,21 @@ export async function rankedProviders(admin: SupabaseClient): Promise<Provider[]
 }
 
 function prompt(input: TranslationInput): { system: string; user: string } {
-  const common =
-    "Return one compact JSON object only. Never use placeholder text. Translate into natural Simplified Chinese based on the supplied context. Do not invent facts.";
   if (input.scope === "word") {
     return {
       system:
-        `${common} Required keys: translation, lemma, partOfSpeech, phonetic. ` +
-        "translation must be the meaning of the selected word in this exact sentence. The other three keys may be empty strings.",
+        "You are an English-to-Simplified-Chinese reading assistant. " +
+        "Use the current sentence and the adjacent sentences. Translate only the selection. " +
+        "Return one strict JSON object with lemma, phonetic, partOfSpeech, translation, commonTranslation, referent. " +
+        "If the selection is a pronoun or demonstrative " +
+        "(it, its, itself, they, them, their, this, that, these, those, he, him, his, she, her, one, ones, which, who, whom), " +
+        "set referent=true, leave commonTranslation empty, and put the antecedent in translation as " +
+        "Simplified Chinese like 指代脉冲星 or 指代前文的恒星风. Never gloss these as 它/它们/这些/那些/这个/那个. " +
+        "For other tiny function words (the, a, an, of, to, and, or), also set referent=true, " +
+        "describe only their role in THIS sentence, and leave commonTranslation empty. " +
+        "For content words: referent=false; translation is the contextual sense in 1-12 characters; " +
+        "commonTranslation is the usual dictionary sense only when it clearly differs, otherwise empty. " +
+        "Use empty strings when lemma, phonetic, or partOfSpeech cannot be verified. No markdown.",
       user: JSON.stringify({
         selectedWord: input.word,
         previousSentence: normalized(input.before),
@@ -144,7 +153,11 @@ function prompt(input: TranslationInput): { system: string; user: string } {
   }
   return {
     system:
-      `${common} Required key: translation. Translate only currentSentence, using adjacent sentences solely to resolve context.`,
+      "Translate ONLY the current English sentence into natural, accurate Simplified Chinese. " +
+      "Adjacent sentences are context only: use them to resolve pronouns, references, tense, tone, and word sense. " +
+      "Do not translate the adjacent sentences, do not summarize, and do not add facts that are not in the current sentence. " +
+      "Prefer contextual meaning over word-for-word calque. Preserve names and factual meaning. " +
+      "Return one strict JSON object with translation. No markdown.",
     user: JSON.stringify({
       previousSentence: normalized(input.before),
       currentSentence: normalized(input.sentence),
@@ -153,7 +166,7 @@ function prompt(input: TranslationInput): { system: string; user: string } {
   };
 }
 
-function parseResult(raw: string, scope: "word" | "sentence"): Record<string, string> {
+function parseResult(raw: string, scope: "word" | "sentence"): Record<string, string | boolean> {
   const unfenced = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   const start = unfenced.indexOf("{");
   const end = unfenced.lastIndexOf("}");
@@ -168,11 +181,20 @@ function parseResult(raw: string, scope: "word" | "sentence"): Record<string, st
     throw new Error("INVALID_TRANSLATION");
   }
   if (scope === "sentence") return { translation };
+  const referent = Boolean(parsed.referent) || /^(?:文中)?指代/.test(translation);
+  if (BARE_PRONOUN_GLOSSES.has(translation)) throw new Error("BARE_PRONOUN");
+  if (translation.length > 56) throw new Error("GLOSS_TOO_LONG");
+  let common = String(parsed.commonTranslation ?? "").trim();
+  if (referent || PLACEHOLDERS.has(common) || !/[\u3400-\u9fff]/u.test(common) || common.length > 40 || common === translation) {
+    common = "";
+  }
   return {
     translation,
     lemma: String(parsed.lemma ?? "").trim(),
     partOfSpeech: String(parsed.partOfSpeech ?? "").trim(),
     phonetic: String(parsed.phonetic ?? "").trim(),
+    commonTranslation: common,
+    referent,
   };
 }
 
@@ -180,7 +202,7 @@ async function callProvider(
   provider: Provider,
   input: TranslationInput,
   timeoutMs: number,
-): Promise<{ result: Record<string, string>; latencyMs: number }> {
+): Promise<{ result: Record<string, string | boolean>; latencyMs: number }> {
   const startedAt = performance.now();
   const messages = prompt(input);
   const controller = new AbortController();

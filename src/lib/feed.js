@@ -27,16 +27,43 @@ export function rankArticles(articles, preferences = {}) {
   });
 }
 
+function hasBody(article) {
+  return Boolean(article?.paragraphs?.length);
+}
+
 export function displayFeed(feed, preferences = {}, library = []) {
-  const live = uniqueArticles([feed?.primary, ...(feed?.alternatives || [])]);
+  const source = feed?.rawPrimary !== undefined || feed?.rawAlternatives
+    ? { primary: feed.rawPrimary, alternatives: feed.rawAlternatives || [], fallback: feed.fallback }
+    : feed;
+  const live = uniqueArticles([source?.primary, ...(source?.alternatives || [])]);
   const level = preferences.level || "B1";
-  const hasExact = live.some((article) => article.cefr === level);
-  const extras = hasExact ? [] : library.filter((article) => article.cefr === level);
-  const ranked = rankArticles(uniqueArticles([...live, ...extras]), preferences);
-  const primary = ranked[0] || feed?.primary || null;
+  const readableLive = live.filter(hasBody);
+  const hasExact = readableLive.some((article) => article.cefr === level);
+  const extras = hasExact ? [] : (library || []).filter((article) => article.cefr === level && hasBody(article));
+  const ranked = rankArticles(uniqueArticles([...readableLive, ...extras]), preferences);
+  const primary = ranked[0]
+    || live.find((article) => article.cefr === level)
+    || readableLive[0]
+    || live[0]
+    || null;
+  const fromLive = Boolean(primary?.id && readableLive.some((article) => article.id === primary.id));
+  const levelMatched = Boolean(primary?.cefr === level && hasBody(primary));
   return {
     primary,
-    alternatives: ranked.filter((article) => article.id !== primary?.id).slice(0, 4),
-    exactMatch: primary?.cefr === level,
+    alternatives: uniqueArticles([
+      ...ranked.filter((article) => article.id !== primary?.id),
+      ...live.filter((article) => !hasBody(article)),
+    ]).slice(0, 4),
+    exactMatch: levelMatched,
+    standby: Boolean(source?.fallback) || !fromLive || !levelMatched,
+    fallback: Boolean(source?.fallback),
+    rawPrimary: source?.primary ?? null,
+    rawAlternatives: source?.alternatives ?? [],
   };
+}
+
+export function articleWithBody(article, library = []) {
+  if (article?.paragraphs?.length) return article;
+  const same = (library || []).find((item) => item?.id && item.id === article?.id && item.paragraphs?.length);
+  return same || article || null;
 }

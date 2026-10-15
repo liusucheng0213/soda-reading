@@ -94,6 +94,19 @@ def test_word_and_sentence_local_fallback():
     assert "独立书店" in sentence.json()["translation"]
 
 
+@pytest.mark.asyncio
+async def test_dictionary_fallback_is_not_cached_for_a_month():
+    gateway = TranslationGateway(Settings(translation_provider_order=""))
+    payload = {"word": "infrastructure", "sentence": "A public library is infrastructure."}
+    first = await gateway.translate("word", payload)
+    assert first["provider"] == "local-corpus"
+    assert first["translation"] == "基础结构"
+    assert gateway.cache == {}
+    second = await gateway.translate("word", payload)
+    assert second["cacheLayer"] == "local"
+    assert gateway.cache == {}
+
+
 def test_unknown_word_never_returns_placeholder_translation():
     response = client.post(
         "/translations/word",
@@ -349,6 +362,17 @@ def test_word_referent_validation_omits_dictionary_sense():
     assert result["referent"] is True
     assert result["commonTranslation"] == ""
     assert result["translation"] == "指代前文的恒星风"
+    labeled = TranslationGateway._validate_result(
+        "word",
+        {
+            "translation": "文中指代河岸",
+            "commonTranslation": "它",
+            "referent": False,
+        },
+        SimpleNamespace(kind="openai"),
+    )
+    assert labeled["referent"] is True
+    assert labeled["commonTranslation"] == ""
     with pytest.raises(ProviderResponseError):
         TranslationGateway._validate_result(
             "word",
@@ -377,3 +401,27 @@ def test_production_mode_closes_demo_sms_and_protects_admin():
     finally:
         main_module.settings.app_env = previous_env
         main_module.settings.admin_api_token = previous_token
+
+
+def test_vocabulary_keeps_each_sentence_sense():
+    token = login()
+    main_module.vocabulary_store["user-8000"] = []
+    headers = {"Authorization": f"Bearer {token}"}
+    river = {
+        "contentId": "piece",
+        "word": "bank",
+        "translation": "河岸",
+        "sentence": "We sat on the river bank.",
+    }
+    finance = {**river, "translation": "银行", "sentence": "She works at a bank."}
+    first = client.post("/vocabulary", headers=headers, json=river)
+    second = client.post("/vocabulary", headers=headers, json=finance)
+    assert first.status_code == 200
+    assert second.json()["count"] == 2
+    updated = client.post("/vocabulary", headers=headers, json={**river, "translation": "岸边"})
+    assert updated.json()["count"] == 2
+    saved = {item["sentence"]: item["translation"] for item in main_module.vocabulary_store["user-8000"]}
+    assert saved == {
+        "We sat on the river bank.": "岸边",
+        "She works at a bank.": "银行",
+    }

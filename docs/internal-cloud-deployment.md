@@ -23,7 +23,7 @@ npx supabase link --project-ref 你的项目ref
 npx supabase db push
 ```
 
-`supabase/migrations` 是唯一云数据库迁移源。推送后，在 Supabase Dashboard 的 Authentication → Providers 中再次确认：
+`supabase/migrations` 是唯一云数据库迁移源。2026-10-15 新增的迁移包括文章中文导读 `intro_zh`、生词原句键 `sentence_key`，以及常见义 `common_translation` 和文中指代 `referent`。未推送前，网页会退回旧的生词保存方式，这两项注释先留在本机。推送后，在 Supabase Dashboard 的 Authentication → Providers 中再次确认：
 
 - Allow new users to sign up：关闭。
 - Anonymous sign-ins：关闭。

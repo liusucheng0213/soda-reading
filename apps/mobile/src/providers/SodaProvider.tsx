@@ -159,13 +159,18 @@ export function SodaProvider({ children }: { children: React.ReactNode }) {
     }
   }, [client]);
 
+  const feedRequest = useRef(0);
   const refreshFeed = useCallback(async () => {
     if (!client) return;
+    const generation = feedRequest.current + 1;
+    feedRequest.current = generation;
     try {
       const next = await client.dailyFeed() as DailyFeed;
+      if (feedRequest.current !== generation) return;
       setFeed(next);
       await saveCachedFeed(next);
     } catch (error) {
+      if (feedRequest.current !== generation) return;
       const cached = await loadCachedFeed();
       if (cached) setFeed({ ...cached, fallback: true });
       else throw error;

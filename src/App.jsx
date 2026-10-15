@@ -31,6 +31,7 @@ import {
   cloudConfigured,
   deleteSyncedVocabulary,
   loadSyncedVocabulary,
+  loadSyncedProgress,
   loginWithPassword,
   logout,
   restoreSession,
@@ -41,13 +42,22 @@ import {
 } from "./lib/api.js";
 import { dueCards, REVIEW_RATINGS, scheduleReview } from "@soda-reading/core";
 import { inspectAndParseFile } from "./lib/importers.js";
-import { listLocalDocuments, persistState, saveLocalDocument, useStoredState } from "./lib/storage.js";
+import { listLocalDocuments, persistState, resolveAccountBase, saveLocalDocument, useStoredState, writeAccountState } from "./lib/storage.js";
 import { AdminApp } from "./AdminApp.jsx";
 import { ReaderScreen } from "./screens/ReaderScreen.jsx";
-import { displayFeed } from "./lib/feed.js";
+import { articleWithBody, displayFeed } from "./lib/feed.js";
 import {
+  applyReadingProgress,
   freshnessLabel,
+  glossText,
+  isCurrentSave,
+  mergeRemoteProgress,
+  mergeVocabulary,
+  vocabularyRemoteSave,
   remainingMinutes,
+  resumeFromProgress,
+  shouldFlushProgressOnHide,
+  todayReadMinutes,
   uniqueArticles,
   vocabSource,
 } from "./lib/study.js";
@@ -59,11 +69,30 @@ const NAV_ITEMS = [
   { id: "profile", label: "我的", icon: UserCircle },
 ];
 
-function articleWithBody(article) {
-  if (article?.paragraphs?.length) return article;
-  return fallbackLibrary.find((item) => item.id === article?.id)
-    || fallbackLibrary.find((item) => item.cefr === article?.cefr)
-    || article;
+const EMPTY_LIST = [];
+const EMPTY_PROGRESS = {};
+
+function useAccountState(username, bucket, fallback) {
+  const owner = username || "";
+  const [packet, setPacket] = useState(() => ({
+    owner,
+    value: resolveAccountBase(null, owner, bucket, fallback),
+  }));
+  if (packet.owner !== owner) {
+    setPacket({ owner, value: resolveAccountBase(packet, owner, bucket, fallback) });
+  }
+  const value = resolveAccountBase(packet, owner, bucket, fallback);
+
+  const update = (next) => {
+    setPacket((current) => {
+      const base = resolveAccountBase(current, owner, bucket, fallback);
+      const resolved = typeof next === "function" ? next(base) : next;
+      if (owner) writeAccountState(owner, bucket, resolved);
+      return { owner, value: resolved };
+    });
+  };
+
+  return [value, update];
 }
 
 function speakEnglish(text) {
@@ -119,18 +148,56 @@ function SodaApp() {
   const [syncState, setSyncState] = useState(cloudConfigured ? "正在连接云端…" : "本地开发模式");
   const [theme, setTheme] = usePersistentState("soda.theme", "day");
   const [readingPrefs, setReadingPrefs] = usePersistentState("soda.readingPrefs", defaultReadingPrefs);
-  const [resume, setResume] = usePersistentState("soda.resume", null);
+  const accountName = profile?.username || "";
+  const [resume, setResume] = useAccountState(accountName, "resume", null);
   const [screen, setScreen] = useState("home");
   const [activeArticle, setActiveArticle] = useState(null);
-  const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives });
+  const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives, fallback: true });
   const [documents, setDocuments] = useState([]);
-  const [vocabulary, setVocabulary] = usePersistentState("soda.vocabulary", []);
-  const [highlights, setHighlights] = usePersistentState("soda.highlights", []);
-  const [progress, setProgress] = usePersistentState("soda.progress", {});
+  const [vocabulary, setVocabulary] = useAccountState(accountName, "vocabulary", EMPTY_LIST);
+  const [highlights, setHighlights] = useAccountState(accountName, "highlights", EMPTY_LIST);
+  const [progress, setProgress] = useAccountState(accountName, "progress", EMPTY_PROGRESS);
+  const [readingDay, setReadingDay] = useAccountState(accountName, "readingDay", null);
   const [loginHint, setLoginHint] = useState(null);
   const [readerFocus, setReaderFocus] = useState(null);
   const [vocabReviewing, setVocabReviewing] = useState(false);
   const [vocabRevealed, setVocabRevealed] = useState(false);
+  const [closedArticleId, setClosedArticleId] = useState("");
+  const progressSyncRef = useRef({ timer: 0, payload: null });
+  const profileSaveRef = useRef(0);
+
+  const flushProgressSync = () => {
+    window.clearTimeout(progressSyncRef.current.timer);
+    const payload = progressSyncRef.current.payload;
+    progressSyncRef.current.payload = null;
+    if (!payload) return;
+    saveSyncedProgress(payload).catch(() => setSyncState("阅读进度待同步"));
+  };
+
+  const queueProgressSync = (payload) => {
+    progressSyncRef.current.payload = payload;
+    window.clearTimeout(progressSyncRef.current.timer);
+    progressSyncRef.current.timer = window.setTimeout(flushProgressSync, 600);
+  };
+
+  const flushProgressSyncRef = useRef(flushProgressSync);
+  flushProgressSyncRef.current = flushProgressSync;
+
+  useEffect(() => {
+    const onHide = (event) => {
+      if (shouldFlushProgressOnHide(event)) flushProgressSyncRef.current();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+      window.clearTimeout(progressSyncRef.current.timer);
+      const payload = progressSyncRef.current.payload;
+      progressSyncRef.current.payload = null;
+      if (payload) saveSyncedProgress(payload).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     if (!cloudConfigured) return;
@@ -166,17 +233,48 @@ function SodaApp() {
   }, []);
 
   useEffect(() => {
-    if (!session?.accessToken || profile?.mustChangePassword) return;
-    getDailyFeed(session.accessToken, profile).then(setFeed).catch(() => undefined);
+    const shown = displayFeed(feed, profile, fallbackLibrary);
+    const catalog = uniqueArticles([
+      shown.primary,
+      ...(shown.alternatives ?? []),
+      ...fallbackLibrary,
+      ...documents,
+    ]);
+    const next = resumeFromProgress(catalog, progress, resume);
+    if (!next?.id || next.id === resume?.id) return;
+    setResume(next);
+  }, [feed, profile, documents, progress, resume]);
+
+  useEffect(() => {
+    if (!session?.accessToken || profile?.mustChangePassword) return undefined;
+    let active = true;
+    getDailyFeed(session.accessToken, profile).then((next) => {
+      if (active) setFeed(next);
+    }).catch(() => undefined);
     if (cloudConfigured) {
       loadSyncedVocabulary()
         .then((items) => {
-          if (items) setVocabulary(items);
+          if (!active || !items) return;
+          setVocabulary((current) => mergeVocabulary(current, items));
           setSyncState("云端已同步");
         })
-        .catch(() => setSyncState("离线使用 · 稍后同步"));
+        .catch(() => {
+          if (active) setSyncState("离线使用 · 稍后同步");
+        });
+      loadSyncedProgress()
+        .then((rows) => {
+          if (!active || !rows?.length) return;
+          setProgress((current) => mergeRemoteProgress(current, rows));
+          setSyncState("云端已同步");
+        })
+        .catch(() => {
+          if (active) setSyncState("阅读进度待同步");
+        });
     }
-  }, [session?.accessToken, profile?.mustChangePassword, profile?.level, JSON.stringify(profile?.topics ?? [])]);
+    return () => {
+      active = false;
+    };
+  }, [session?.accessToken, profile?.mustChangePassword]);
 
   const authenticate = ({ session: nextSession, profile: nextProfile }) => {
     setSession(nextSession);
@@ -187,18 +285,24 @@ function SodaApp() {
 
   const updateProfile = (next) => {
     const value = typeof next === "function" ? next(profile) : next;
+    const generation = profileSaveRef.current + 1;
+    profileSaveRef.current = generation;
     setProfile(value);
     setSyncState("正在同步设置…");
     saveProfile(value, session?.accessToken)
       .then(async (saved) => {
+        if (!isCurrentSave(generation, profileSaveRef.current)) return;
         const merged = { ...value, ...saved, onboarded: true };
         setProfile(merged);
         setSyncState(cloudConfigured ? "云端已同步" : "本地已保存");
-        if (session?.accessToken) {
-          setFeed(await getDailyFeed(session.accessToken, merged));
-        }
+        if (!session?.accessToken) return;
+        const nextFeed = await getDailyFeed(session.accessToken, merged);
+        if (!isCurrentSave(generation, profileSaveRef.current)) return;
+        setFeed(nextFeed);
       })
-      .catch(() => setSyncState("设置待同步"));
+      .catch(() => {
+        if (isCurrentSave(generation, profileSaveRef.current)) setSyncState("设置待同步");
+      });
   };
 
   const updateVocabulary = (next) => {
@@ -209,11 +313,19 @@ function SodaApp() {
     for (const item of added) {
       saveSyncedVocabulary(item)
         .then((saved) => {
-          if (!saved) return;
-          setVocabulary((current) => current.map((entry) =>
-            entry.id === item.id ? { ...entry, remoteId: saved.id } : entry
-          ));
-          setSyncState("云端已同步");
+          if (!saved?.id) return;
+          setVocabulary((current) => {
+            const outcome = vocabularyRemoteSave(current, item.id, saved.id);
+            queueMicrotask(() => {
+              if (!outcome.deletedRemoteId) {
+                setSyncState("云端已同步");
+                return;
+              }
+              deleteSyncedVocabulary({ remoteId: outcome.deletedRemoteId })
+                .catch(() => setSyncState("删除待同步"));
+            });
+            return outcome.items;
+          });
         })
         .catch(() => setSyncState("生词待同步"));
     }
@@ -277,6 +389,7 @@ function SodaApp() {
         onReadingPrefsChange={setReadingPrefs}
         onThemeChange={setTheme}
         onBack={() => {
+          flushProgressSync();
           setActiveArticle(null);
           setReaderFocus(null);
         }}
@@ -288,23 +401,30 @@ function SodaApp() {
         focus={readerFocus}
         onFocusConsumed={() => setReaderFocus(null)}
         onProgress={(value) => {
+          const previous = progress[activeArticle.id] ?? 0;
           setProgress((current) => ({ ...current, [activeArticle.id]: value }));
+          setReadingDay((log) => applyReadingProgress(log, activeArticle, previous, value));
           setResume((current) => current ? { ...current, progress: value } : current);
-          saveSyncedProgress({
+          queueProgressSync({
             contentHash: activeArticle.contentHash ?? activeArticle.id,
             contentId: activeArticle.id,
             chapterId: "body",
             location: { progress: value },
             progress: value,
-          }).catch(() => setSyncState("阅读进度待同步"));
+          });
         }}
       />
     );
   }
 
+  const readMinutes = todayReadMinutes(readingDay);
   const openArticle = (article, focus) => {
-    const body = articleWithBody(article);
-    if (!body?.paragraphs?.length) return;
+    const body = articleWithBody(article, fallbackLibrary);
+    if (!body?.paragraphs?.length) {
+      setClosedArticleId(article?.id || "");
+      return;
+    }
+    setClosedArticleId("");
     setResume({
       ...body,
       progress: progress[body.id] ?? 0,
@@ -323,7 +443,7 @@ function SodaApp() {
   ]);
   return (
     <div className={`responsive-app app-shell theme-${theme}`}>
-      <DesktopNavigation current={screen} onChange={setScreen} profile={profile} />
+      <DesktopNavigation current={screen} onChange={setScreen} profile={profile} readMinutes={readMinutes} />
       <main className="app-content">
         {screen === "home" && (
           <HomeScreen
@@ -332,6 +452,7 @@ function SodaApp() {
             resume={canResume ? { ...resume, progress: resumeProgress } : null}
             onOpen={openArticle}
             onLevelChange={(level) => updateProfile({ ...profile, level })}
+            closedArticleId={closedArticleId}
           />
         )}
         {screen === "library" && (
@@ -341,6 +462,7 @@ function SodaApp() {
             progress={progress}
             onDocumentsChange={setDocuments}
             onOpen={openArticle}
+            closedArticleId={closedArticleId}
           />
         )}
         {screen === "vocabulary" && (
@@ -366,6 +488,7 @@ function SodaApp() {
             readingPrefs={readingPrefs}
             onReadingPrefsChange={setReadingPrefs}
             syncState={syncState}
+            readMinutes={readMinutes}
             onLogout={async () => {
               await logout();
               setSession(null);
@@ -380,6 +503,7 @@ function SodaApp() {
         feed={shownFeed}
         documents={documents}
         vocabulary={vocabulary}
+        readMinutes={readMinutes}
       />
       <BottomNavigation current={screen} onChange={setScreen} />
     </div>
@@ -476,7 +600,6 @@ function OnboardingScreen({ onComplete }) {
   const [level, setLevel] = useState("B1");
   const [topics, setTopics] = useState(["科技", "文化"]);
   const [minutes, setMinutes] = useState(10);
-  const [reminder, setReminder] = useState("20:30");
 
   const toggleTopic = (topic) => {
     setTopics((current) => current.includes(topic) ? current.filter((item) => item !== topic) : [...current, topic].slice(-4));
@@ -504,22 +627,21 @@ function OnboardingScreen({ onComplete }) {
       </section>
       <section className="setup-section setting-grid">
         <label>每日目标<select value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="20">20 分钟</option></select></label>
-        <label>提醒时间<input type="time" value={reminder} onChange={(event) => setReminder(event.target.value)} /></label>
       </section>
-      <button className="primary-button setup-submit" onClick={() => onComplete({ onboarded: true, level, topics, minutes, reminder })}>保存并查看今日文章</button>
+      <button className="primary-button setup-submit" onClick={() => onComplete({ onboarded: true, level, topics, minutes })}>保存并查看今日文章</button>
     </div>
   );
 }
 
-function HomeScreen({ profile, feed, resume, onOpen, onLevelChange }) {
+function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticleId }) {
   const primary = feed.primary ?? demoArticle;
-  const alternatives = feed.alternatives ?? dailyAlternatives;
+  const alternatives = feed.alternatives ?? [];
   const intro = primary.introZh || primary.summary;
   const featuredProgress = resume?.id === primary.id ? resume.progress : 0;
   return (
     <section className="screen home-screen">
       <header className="screen-header">
-        <div><span className="eyebrow">{todayLabel()}</span><h1>今日阅读</h1></div>
+        <div><span className="eyebrow">{todayLabel()}</span><h1>{feed.standby ? "备用导读" : "今日阅读"}</h1></div>
         <div className="level-switcher" role="tablist" aria-label="阅读水平">
           {levelOptions.map((option) => (
             <button
@@ -550,26 +672,34 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange }) {
         <button className="reading-cta" onClick={() => onOpen(primary)}>
           {featuredProgress > 0.02 ? "继续阅读" : "开始阅读"} <BookOpenText size={20} />
         </button>
+        {closedArticleId === primary.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
       </article>
-      <div className="section-heading"><h3>也许你还喜欢</h3></div>
-      <div className="article-list">
-        {alternatives.map((article) => (
-          <button className="article-row" key={article.id} onClick={() => onOpen(article)}>
-            <span className="article-topic">{article.topic}</span>
-            <span className="article-row-copy">
-              <strong>{article.title}</strong>
-              {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
-              <small>{[article.source, article.cefr, `${article.readingMinutes} 分钟`, freshnessLabel(article)].filter(Boolean).join(" · ")}</small>
-            </span>
-            <BookOpenText size={20} />
-          </button>
-        ))}
-      </div>
+      {alternatives.length > 0 && (
+        <>
+          <div className="section-heading"><h3>也许你还喜欢</h3></div>
+          <div className="article-list">
+            {alternatives.map((article) => (
+              <div key={article.id}>
+                <button className="article-row" onClick={() => onOpen(article)}>
+                  <span className="article-topic">{article.topic}</span>
+                  <span className="article-row-copy">
+                    <strong>{article.title}</strong>
+                    {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
+                    <small>{[article.source, article.cefr, `${article.readingMinutes} 分钟`, freshnessLabel(article)].filter(Boolean).join(" · ")}</small>
+                  </span>
+                  <BookOpenText size={20} />
+                </button>
+                {closedArticleId === article.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   );
 }
 
-function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChange, onOpen }) {
+function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChange, onOpen, closedArticleId }) {
   const inputRef = useRef(null);
   const [importState, setImportState] = useState({ loading: false, message: "", error: "" });
 
@@ -604,15 +734,18 @@ function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChan
           <div className="section-heading"><h3>馆藏</h3><span>{catalog.length} 篇</span></div>
           <div className="article-list">
             {catalog.map((article) => (
-              <button className="article-row" key={article.id} onClick={() => onOpen(article)}>
-                <span className="article-topic">{article.topic ?? "本地"}</span>
-                <span className="article-row-copy">
-                  <strong>{article.title}</strong>
-                  {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
-                  <small>{[article.source, article.cefr, `${remainingMinutes(article, progress[article.id] ?? 0)} 分钟`].filter(Boolean).join(" · ")}</small>
-                </span>
-                <BookOpenText size={20} />
-              </button>
+              <div key={article.id}>
+                <button className="article-row" onClick={() => onOpen(article)}>
+                  <span className="article-topic">{article.topic ?? "本地"}</span>
+                  <span className="article-row-copy">
+                    <strong>{article.title}</strong>
+                    {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
+                    <small>{[article.source, article.cefr, `${remainingMinutes(article, progress[article.id] ?? 0)} 分钟`].filter(Boolean).join(" · ")}</small>
+                  </span>
+                  <BookOpenText size={20} />
+                </button>
+                {closedArticleId === article.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+              </div>
             ))}
           </div>
         </>
@@ -623,11 +756,14 @@ function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChan
       ) : (
         <div className="book-list">
           {documents.map((document) => (
-            <button className="book-row" key={document.id} onClick={() => onOpen(document)}>
-              <span className="book-mark">{document.fileType.toUpperCase()}</span>
-              <span><strong>{document.title}</strong><small>{document.author} · {remainingMinutes(document, progress[document.id] ?? 0)} 分钟</small></span>
-              <BookOpenText size={20} />
-            </button>
+            <div key={document.id}>
+              <button className="book-row" onClick={() => onOpen(document)}>
+                <span className="book-mark">{document.fileType.toUpperCase()}</span>
+                <span><strong>{document.title}</strong><small>{document.author} · {remainingMinutes(document, progress[document.id] ?? 0)} 分钟</small></span>
+                <BookOpenText size={20} />
+              </button>
+              {closedArticleId === document.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+            </div>
           ))}
         </div>
       )}
@@ -689,7 +825,7 @@ function VocabularyScreen({
             <button className="primary-button" onClick={() => onRevealedChange(true)}>显示语境词义</button>
           ) : (
             <>
-              <div className="review-answer"><span>{current.phonetic}</span><em>{current.translation}</em></div>
+              <div className="review-answer"><span>{current.phonetic}</span><em>{glossText(current)}</em></div>
               <div className="review-ratings">
                 {REVIEW_RATINGS.map((rating) => (
                   <button key={rating.id} onClick={() => rate(rating.id)} className={`rating-${rating.key}`}>{rating.label}</button>
@@ -729,7 +865,7 @@ function VocabularyScreen({
             return (
             <article className="saved-word" key={item.id}>
               <button aria-label={`删除 ${item.word}`} onClick={() => onChange(items.filter((entry) => entry.id !== item.id))}><X size={18} /></button>
-              <strong>{item.word}</strong><span>{item.phonetic}</span><em>{item.translation}</em><p>{item.sentence}</p>
+              <strong>{item.word}</strong><span>{item.phonetic}</span><em>{glossText(item)}</em><p>{item.sentence}</p>
               {source && (
                 <button
                   type="button"
@@ -748,7 +884,7 @@ function VocabularyScreen({
   );
 }
 
-function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, readingPrefs, onReadingPrefsChange, syncState, onLogout }) {
+function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, readingPrefs, onReadingPrefsChange, syncState, readMinutes = 0, onLogout }) {
   const prefs = { ...defaultReadingPrefs, ...readingPrefs };
   return (
     <section className="screen profile-screen">
@@ -819,9 +955,9 @@ function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, reading
       </div>
 
       <h3 className="settings-label">节奏</h3>
+      <p className="today-read">今天已读 {readMinutes} / {profile.minutes || 10} 分钟</p>
       <div className="settings-group">
         <label><span>每日目标</span><select value={profile.minutes} onChange={(event) => onProfileChange({ ...profile, minutes: Number(event.target.value) })}><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="20">20 分钟</option></select></label>
-        <label><span>每日提醒</span><input type="time" value={profile.reminder} onChange={(event) => onProfileChange({ ...profile, reminder: event.target.value })} /></label>
         <label><span>每日复习</span><select value={profile.reviewLimit ?? 20} onChange={(event) => onProfileChange({ ...profile, reviewLimit: Number(event.target.value) })}>{[10, 20, 30, 40, 50].map((value) => <option key={value} value={value}>{value} 张</option>)}</select></label>
       </div>
 
@@ -832,7 +968,7 @@ function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, reading
   );
 }
 
-function DesktopNavigation({ current, onChange, profile }) {
+function DesktopNavigation({ current, onChange, profile, readMinutes = 0 }) {
   return (
     <aside className="desktop-navigation">
       <div className="desktop-brand">
@@ -849,13 +985,13 @@ function DesktopNavigation({ current, onChange, profile }) {
       </nav>
       <div className="desktop-level">
         <span>{profile.level}</span>
-        <div><strong>今日目标</strong><small>{profile.minutes} 分钟阅读</small></div>
+        <div><strong>今天已读</strong><small>{readMinutes} / {profile.minutes || 10} 分钟</small></div>
       </div>
     </aside>
   );
 }
 
-function DesktopContextPanel({ screen, profile, feed, documents, vocabulary }) {
+function DesktopContextPanel({ screen, profile, feed, documents, vocabulary, readMinutes = 0 }) {
   const primary = feed.primary ?? demoArticle;
   return (
     <aside className="desktop-context-panel">
@@ -880,7 +1016,7 @@ function DesktopContextPanel({ screen, profile, feed, documents, vocabulary }) {
           <h2>生词</h2>
           <div className="context-stat"><strong>{vocabulary.length}</strong><span>个</span></div>
           {vocabulary.slice(0, 3).map((item) => (
-            <div className="context-word" key={item.id}><strong>{item.word}</strong><span>{item.translation}</span></div>
+            <div className="context-word" key={item.id}><strong>{item.word}</strong><span>{glossText(item)}</span></div>
           ))}
         </>
       )}
@@ -888,7 +1024,7 @@ function DesktopContextPanel({ screen, profile, feed, documents, vocabulary }) {
         <>
           <span className="context-kicker">PROFILE</span>
           <h2>{profile.level} · {levelOptions.find((item) => item.id === profile.level)?.label}</h2>
-          <div className="context-stat"><strong>{profile.minutes}</strong><span>分钟</span></div>
+          <div className="context-stat"><strong>{readMinutes}</strong><span>/ {profile.minutes || 10} 分钟</span></div>
         </>
       )}
     </aside>

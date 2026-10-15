@@ -37,6 +37,7 @@ export type ReadingArticle = {
   topic?: string;
   readingMinutes: number;
   summary?: string;
+  introZh?: string;
   paragraphs: string[];
   sentenceTranslations?: Record<string, string>;
   glossary?: GlossaryItem[];
@@ -63,6 +64,8 @@ export type VocabularyItem = {
   partOfSpeech?: string;
   phonetic?: string;
   translation: string;
+  commonTranslation?: string;
+  referent?: boolean;
   sentence: string;
   before?: string;
   after?: string;

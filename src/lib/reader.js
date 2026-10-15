@@ -10,6 +10,8 @@ export {
   phraseFromItems,
   selectionSpan,
   sha256,
+  shouldFlushProgressOnAppState,
+  speechChunks,
   spokenProgress,
   splitSentenceEnding,
   splitSentences,
