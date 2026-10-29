@@ -125,7 +125,7 @@ Variables 可设置 `ZHIPU_MODEL`、`MODELSCOPE_MODEL`、`SILICONFLOW_MODEL` 和
 - GitHub Actions 1,600 分钟。
 - EAS Android 构建 12 次。
 
-系统的 `PAID_PROVIDER_ENABLED=false`、`DAILY_PAID_BUDGET_CNY=0` 和 `PAID_FALLBACK_MODE=never` 是硬检查。模型额度耗尽时使用文章预生成翻译、共享缓存或最近 7 天备用导读；不会自动产生费用。
+系统的 `PAID_PROVIDER_ENABLED=false`、`DAILY_PAID_BUDGET_CNY=0` 和 `PAID_FALLBACK_MODE=never` 会阻断常规付费兜底。DeepSeek 及被标记为 `cheap_api` 的自定义低价 API 是代码中的例外，配置后仍可能产生费用；要求完全零费用时，不要配置这些密钥，并把它们从翻译与导读路由中移除。免费模型额度耗尽时，系统使用文章预生成翻译、共享缓存或最近 7 天备用导读。
 
 ## 8. 上线前内部验收
 

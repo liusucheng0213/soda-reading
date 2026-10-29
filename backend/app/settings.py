@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     dev_sms_code: str = "246810"
+    local_admin_password: str = ""
     admin_api_token: str = ""
     allowed_origins: str = "http://localhost:4173,http://127.0.0.1:4173"
 

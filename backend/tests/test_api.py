@@ -403,6 +403,28 @@ def test_production_mode_closes_demo_sms_and_protects_admin():
         main_module.settings.admin_api_token = previous_token
 
 
+def test_local_password_login_requires_explicit_password(monkeypatch):
+    monkeypatch.setattr(main_module.settings, "local_admin_password", "")
+    disabled = client.post(
+        "/auth/password/login",
+        json={"username": "admin", "password": "anything"},
+    )
+    assert disabled.status_code == 503
+
+    monkeypatch.setattr(main_module.settings, "local_admin_password", "local-test-only")
+    denied = client.post(
+        "/auth/password/login",
+        json={"username": "admin", "password": "wrong-password"},
+    )
+    assert denied.status_code == 401
+    allowed = client.post(
+        "/auth/password/login",
+        json={"username": "admin", "password": "local-test-only"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["accessToken"]
+
+
 def test_vocabulary_keeps_each_sentence_sense():
     token = login()
     main_module.vocabulary_store["user-8000"] = []

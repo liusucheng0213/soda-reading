@@ -12,10 +12,14 @@ supabase/.branches/
 supabase/.temp/
 .npm-cache/
 .env
-.env.local
-.env.production
-.env.admin
+.env.*
+!.env.example
 .npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
 backend/.pytest_cache/
 backend/app/__pycache__/
 backend/tests/__pycache__/

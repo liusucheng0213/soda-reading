@@ -179,8 +179,10 @@ TRANSLATION_DYNAMIC_ROUTING=true
 ```
 
 同一上下文只调用一次；并发的相同请求会合并，成功结果先写内存再写 Redis。默认请求使用
-`qualityMode=free`，即使服务器保存了付费密钥也不会调用付费模型。若未来确实要启用付费
-兜底，需要同时设置非零预算、单次上限和回退模式：
+`qualityMode=free`，会阻断常规付费兜底，但 DeepSeek 及被标记为 `cheap_api` 的自定义低价
+API 属于例外，配置后仍可能参与路由并产生费用。要求完全零费用时，不要配置这些密钥，
+并把它们从翻译与导读路由中移除。若未来确实要启用其他付费兜底，需要同时设置非零预算、
+单次上限和回退模式：
 
 ```dotenv
 PAID_PROVIDER_ENABLED=true

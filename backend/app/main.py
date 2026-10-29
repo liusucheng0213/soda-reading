@@ -123,7 +123,13 @@ async def password_login(payload: PasswordLoginRequest) -> dict:
     username = payload.username.strip().lower()
     if settings.app_env != "development":
         raise HTTPException(status_code=503, detail="请使用云端账号登录")
-    if username != "admin" or payload.password != "Soda-local-2026!":
+    if not settings.local_admin_password:
+        raise HTTPException(status_code=503, detail="未配置本地管理员密码，请设置 LOCAL_ADMIN_PASSWORD")
+    credentials_valid = compare_digest(username, "admin") and compare_digest(
+        payload.password,
+        settings.local_admin_password,
+    )
+    if not credentials_valid:
         raise HTTPException(status_code=401, detail="用户名或密码不正确")
     token = token_urlsafe(32)
     user = {"id": "local-admin", "username": "admin"}
