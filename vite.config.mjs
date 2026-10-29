@@ -2,12 +2,14 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => ({
+  define: {
+    "import.meta.env.VITE_ADMIN_ONLY": JSON.stringify(mode === "admin" ? "true" : "false"),
+  },
   build: {
     rollupOptions: {
       output: {
         manualChunks(id) {
           const normalized = id.replaceAll("\\", "/");
-          if (normalized.includes("/node_modules/@supabase/")) return "cloud-client";
           if (normalized.includes("/node_modules/@phosphor-icons/")) return "reader-icons";
           if (mode !== "admin" && normalized.includes("/node_modules/fflate/")) {
             return "document-import";

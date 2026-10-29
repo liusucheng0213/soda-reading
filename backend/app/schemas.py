@@ -40,22 +40,6 @@ class TranslationRequest(BaseModel):
     qualityMode: Literal["free", "balanced", "precise"] = "free"
 
 
-class ProgressRequest(BaseModel):
-    contentId: str
-    contentHash: str | None = None
-    progress: float = Field(ge=0, le=1)
-
-
-class VocabularyRequest(BaseModel):
-    contentId: str
-    word: str
-    lemma: str = ""
-    phonetic: str = ""
-    partOfSpeech: str = ""
-    translation: str
-    sentence: str
-
-
 class SourcePolicy(BaseModel):
     id: str
     name: str

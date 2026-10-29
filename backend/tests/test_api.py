@@ -16,6 +16,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def isolate_tests_from_real_cloud_credentials(monkeypatch):
     """Unit tests must be deterministic and must never consume a user's API quota."""
+    monkeypatch.setattr(main_module.settings, "dev_sms_code", "000000")
     offline_gateway = TranslationGateway(
         Settings(
             modelscope_access_token="",
@@ -43,13 +44,11 @@ def login() -> str:
 def test_login_feed_and_preferences():
     token = login()
     headers = {"Authorization": f"Bearer {token}"}
-    response = client.put(
-        "/profile/preferences",
+    feed = client.get(
+        "/feed/daily",
         headers=headers,
-        json={"level": "B1", "topics": ["文化"], "minutes": 10, "reminder": "20:30"},
+        params={"level": "B1", "topics": "文化"},
     )
-    assert response.status_code == 200
-    feed = client.get("/feed/daily", headers=headers)
     assert feed.status_code == 200
     assert feed.json()["primary"]["publishedAt"]
     assert len(feed.json()["alternatives"]) >= 2
@@ -58,18 +57,16 @@ def test_login_feed_and_preferences():
 def test_feed_switches_primary_article_with_cefr():
     token = login()
     headers = {"Authorization": f"Bearer {token}"}
-    client.put(
-        "/profile/preferences",
+    a2 = client.get(
+        "/feed/daily",
         headers=headers,
-        json={"level": "A2", "topics": ["文化"], "minutes": 10, "reminder": "20:30"},
-    )
-    a2 = client.get("/feed/daily", headers=headers).json()
-    client.put(
-        "/profile/preferences",
+        params={"level": "A2", "topics": "文化"},
+    ).json()
+    b2 = client.get(
+        "/feed/daily",
         headers=headers,
-        json={"level": "B2", "topics": ["文化"], "minutes": 10, "reminder": "20:30"},
-    )
-    b2 = client.get("/feed/daily", headers=headers).json()
+        params={"level": "B2", "topics": "文化"},
+    ).json()
     assert a2["primary"]["cefr"] == "A2"
     assert b2["primary"]["cefr"] == "B2"
     assert a2["primary"]["id"] != b2["primary"]["id"]
@@ -332,14 +329,14 @@ def test_admin_provider_config_roundtrip_masks_keys(tmp_path, monkeypatch):
                 "label": "DeepSeek",
                 "baseUrl": "https://api.deepseek.com",
                 "model": "deepseek-chat",
-                "apiKey": "sk-test-secret-key",
+                "apiKey": "unit-test-provider-key",
                 "enabled": True,
                 "cheapApi": True,
             }],
         },
     )
     assert saved.status_code == 200
-    assert "sk-test-secret-key" not in saved.text
+    assert "unit-test-provider-key" not in saved.text
     assert saved.json()["config"]["providers"][0]["hasKey"] is True
 
 
@@ -403,25 +400,33 @@ def test_production_mode_closes_demo_sms_and_protects_admin():
         main_module.settings.admin_api_token = previous_token
 
 
-def test_vocabulary_keeps_each_sentence_sense():
+def test_provider_presets_match_settings_defaults():
+    from app.provider_config import PROVIDER_PRESETS
+
+    presets = {item["id"]: item for item in PROVIDER_PRESETS}
+    assert presets["deepseek"]["model"] == Settings.model_fields["deepseek_model"].default
+    assert presets["zhipu"]["model"] == Settings.model_fields["zhipu_model"].default
+    assert presets["modelscope"]["model"] == Settings.model_fields["modelscope_model"].default
+
+
+def test_local_only_learning_state_has_no_server_write_endpoints():
     token = login()
-    main_module.vocabulary_store["user-8000"] = []
     headers = {"Authorization": f"Bearer {token}"}
-    river = {
-        "contentId": "piece",
-        "word": "bank",
-        "translation": "河岸",
-        "sentence": "We sat on the river bank.",
-    }
-    finance = {**river, "translation": "银行", "sentence": "She works at a bank."}
-    first = client.post("/vocabulary", headers=headers, json=river)
-    second = client.post("/vocabulary", headers=headers, json=finance)
-    assert first.status_code == 200
-    assert second.json()["count"] == 2
-    updated = client.post("/vocabulary", headers=headers, json={**river, "translation": "岸边"})
-    assert updated.json()["count"] == 2
-    saved = {item["sentence"]: item["translation"] for item in main_module.vocabulary_store["user-8000"]}
-    assert saved == {
-        "We sat on the river bank.": "岸边",
-        "She works at a bank.": "银行",
-    }
+    preference = client.put(
+        "/profile/preferences",
+        headers=headers,
+        json={"level": "B1", "topics": ["文化"], "minutes": 10, "reminder": "20:30"},
+    )
+    progress = client.put(
+        "/reading-progress",
+        headers=headers,
+        json={"contentId": "piece", "progress": 0.5},
+    )
+    vocabulary = client.post(
+        "/vocabulary",
+        headers=headers,
+        json={"contentId": "piece", "word": "bank", "translation": "河岸", "sentence": "A river bank."},
+    )
+    assert preference.status_code == 404
+    assert progress.status_code == 404
+    assert vocabulary.status_code == 404

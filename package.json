@@ -2,9 +2,9 @@
   "name": "soda-reading",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "workspaces": [
-    "apps/*",
     "packages/*"
   ],
   "scripts": {
@@ -12,38 +12,23 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:web": "vitest run",
-    "build:web": "vite build",
-    "build:admin": "vite build --mode admin --outDir dist-admin",
-    "typecheck:mobile": "npm run typecheck -w @soda-reading/mobile",
-    "test:all": "npm run test:web && npm run typecheck:mobile",
-    "supabase:start": "npx supabase start",
-    "supabase:stop": "npx supabase stop",
-    "supabase:reset": "npx supabase db reset",
-    "test:supabase": "node scripts/test-supabase-rls.mjs",
-    "test:edge": "node scripts/test-edge-functions.mjs"
+    "build:web": "vite build && node scripts/assert-build.mjs web",
+    "build:admin": "vite build --mode admin --outDir dist-admin && node scripts/assert-build.mjs admin"
   },
   "dependencies": {
     "@fontsource/inter": "5.2.6",
     "@fontsource/newsreader": "5.2.8",
     "@phosphor-icons/react": "2.1.10",
-    "@soda-reading/api-client": "0.1.0",
     "@soda-reading/core": "0.1.0",
-    "@supabase/supabase-js": "2.110.8",
     "@vitejs/plugin-react": "5.0.4",
-    "fflate": "0.8.2",
+    "fflate": "^0.8.3",
     "pdfjs-dist": "5.4.296",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-native-gesture-handler": "2.32.0",
-    "react-native-reanimated": "4.5.0",
-    "react-native-safe-area-context": "5.7.0",
-    "react-native-worklets": "0.10.0",
-    "ts-fsrs": "5.4.1",
-    "vite": "6.4.2"
+    "vite": "^6.4.5"
   },
   "devDependencies": {
     "jsdom": "26.1.0",
-    "vitest": "3.2.4"
+    "vitest": "^5.0.5"
   }
 }

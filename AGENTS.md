@@ -8,6 +8,7 @@ When implementing from a selected generated mock, treat that image as the source
 
 ## Durable Soda Reading decisions
 
+- Run locally only: the Vite reader plus the FastAPI backend. Progress, vocabulary, highlights, and preferences stay in the browser. Do not add Supabase, Cloudflare, Expo, or other cloud hosting unless asked.
 - Use the selected combined mock at `reference-reader.png` as the reader source of truth.
 - Day mode uses warm ivory paper, charcoal text, and muted mint accents; night mode uses deep ink navy, warm gray text, and restrained cyan accents.
 - A tapped word, or a short dragged phrase, shows its Chinese contextual gloss directly underneath as an interlinear annotation using CSS ruby (`ruby-position: under`). The gloss must reserve line space and must not overlay the next English line. While dragging, keep each word in place and only underline the range; collapse the phrase after the pointer is released. If the common dictionary sense differs, show it as a quieter second line labeled 常见. Pronouns and demonstratives (`it`, `those`, `these`) show only what they refer to in the text, labeled 文中指代; do not show a dictionary 常见义 for these or other tiny function words. Never use a popover, tooltip, card, drawer, or bottom sheet for word translation.

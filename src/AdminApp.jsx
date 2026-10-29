@@ -4,26 +4,17 @@ import {
   GearSix,
   Plus,
   ShieldCheck,
-  UserCircle,
 } from "@phosphor-icons/react";
 import { sourcePolicies } from "./data.js";
 import {
-  cloudConfigured,
-  createAdminUser,
-  getAdminUsers,
   getContentCandidates,
   getContentRuns,
   getProviderConfig,
   getProviderStatus,
-  getQuotaStatus,
   getSourceStatus,
   getTranslationOverview,
-  resetAdminUserPassword,
-  restoreSession,
-  revokeAdminUserSessions,
   runContentPipeline,
   saveProviderConfig,
-  setAdminUserStatus,
 } from "./lib/api.js";
 
 const PROVIDER_LABELS = {
@@ -37,7 +28,6 @@ const PROVIDER_LABELS = {
 
 const TABS = [
   { id: "sources", label: "内容来源", icon: ShieldCheck },
-  { id: "accounts", label: "内部账号", icon: UserCircle },
   { id: "models", label: "模型路由", icon: GearSix },
 ];
 
@@ -61,38 +51,19 @@ const EMPTY_PROVIDER = {
 };
 
 export function AdminApp() {
-  const [adminAccess, setAdminAccess] = useState(cloudConfigured ? "checking" : "allowed");
   const [adminTab, setAdminTab] = useState("sources");
   const [sources, setSources] = useState(sourcePolicies);
   const [providers, setProviders] = useState([]);
   const [providerConfig, setProviderConfig] = useState(null);
   const [translationOverview, setTranslationOverview] = useState(null);
-  const [quotaStatus, setQuotaStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [pipelineError, setPipelineError] = useState("");
-  const [users, setUsers] = useState([]);
-  const [userForm, setUserForm] = useState({
-    username: "",
-    displayName: "",
-    cefr: "B1",
-    topics: ["科技", "文化"],
-  });
-  const [accountBusy, setAccountBusy] = useState(false);
-  const [issuedCredential, setIssuedCredential] = useState(null);
   const [modelBusy, setModelBusy] = useState(false);
   const [modelNotice, setModelNotice] = useState("");
 
   useEffect(() => {
-    if (!cloudConfigured) return;
-    restoreSession()
-      .then((restored) => setAdminAccess(restored?.profile?.role === "admin" ? "allowed" : "denied"))
-      .catch(() => setAdminAccess("denied"));
-  }, []);
-
-  useEffect(() => {
-    if (adminAccess !== "allowed") return;
     let active = true;
     Promise.allSettled([
       getProviderStatus(),
@@ -100,8 +71,6 @@ export function AdminApp() {
       getSourceStatus(),
       getContentRuns(),
       getContentCandidates(),
-      getAdminUsers(),
-      getQuotaStatus(),
       getProviderConfig(),
     ]).then(([
       providerResult,
@@ -109,8 +78,6 @@ export function AdminApp() {
       sourceResult,
       runResult,
       candidateResult,
-      userResult,
-      quotaResult,
       configResult,
     ]) => {
       if (!active) return;
@@ -119,58 +86,10 @@ export function AdminApp() {
       if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
       if (runResult.status === "fulfilled") setRuns(runResult.value);
       if (candidateResult.status === "fulfilled") setCandidates(candidateResult.value);
-      if (userResult.status === "fulfilled") setUsers(userResult.value.users ?? []);
-      if (quotaResult.status === "fulfilled") setQuotaStatus(quotaResult.value);
       if (configResult.status === "fulfilled") setProviderConfig(configResult.value);
     });
     return () => { active = false; };
-  }, [adminAccess]);
-
-  async function refreshUsers() {
-    const result = await getAdminUsers();
-    setUsers(result.users ?? []);
-  }
-
-  async function createInternalUser(event) {
-    event.preventDefault();
-    setAccountBusy(true);
-    setPipelineError("");
-    try {
-      const result = await createAdminUser(userForm);
-      setIssuedCredential({
-        username: result.user.username,
-        password: result.temporaryPassword,
-      });
-      setUserForm({ username: "", displayName: "", cefr: "B1", topics: ["科技", "文化"] });
-      await refreshUsers();
-    } catch (error) {
-      setPipelineError(error.message || "账号创建失败");
-    } finally {
-      setAccountBusy(false);
-    }
-  }
-
-  async function toggleInternalUser(user) {
-    if (!window.confirm(`${user.is_active ? "停用" : "启用"}账号 ${user.username}？`)) return;
-    await setAdminUserStatus(user.id, !user.is_active);
-    await refreshUsers();
-  }
-
-  async function resetInternalPassword(user) {
-    if (!window.confirm(`为 ${user.username} 生成新临时密码并撤销原会话？`)) return;
-    const result = await resetAdminUserPassword(user.id);
-    setIssuedCredential({
-      username: result.user.username,
-      password: result.temporaryPassword,
-    });
-    await refreshUsers();
-  }
-
-  async function revokeSessions(user) {
-    if (!window.confirm(`撤销 ${user.username} 的所有现有会话？`)) return;
-    await revokeAdminUserSessions(user.id);
-    await refreshUsers();
-  }
+  }, []);
 
   async function refreshContentData() {
     const [sourceResult, runResult, candidateResult] = await Promise.all([
@@ -252,9 +171,7 @@ export function AdminApp() {
   const rankedProviders = [...providers].sort(
     (left, right) => (left.routeRank ?? 99) - (right.routeRank ?? 99),
   );
-  const cacheHits = translationOverview
-    ? translationOverview.cache.memoryHits + translationOverview.cache.redisHits
-    : 0;
+  const cacheHits = translationOverview?.cache?.memoryHits ?? 0;
   const latestRun = runs[0];
   const acceptedCandidates = candidates.filter((item) => item.status === "accepted").length;
   const activeSources = sources.filter((item) => item.status === "active").length;
@@ -263,21 +180,8 @@ export function AdminApp() {
     : acceptedCandidates;
   const titles = {
     sources: "内容来源",
-    accounts: "内部账号",
     models: "模型路由",
   };
-
-  if (adminAccess === "checking") {
-    return <div className="entry-shell auth-loading">正在验证管理员权限…</div>;
-  }
-  if (adminAccess === "denied") {
-    return (
-      <div className="entry-shell auth-screen admin-denied">
-        <div className="auth-brand"><span className="brand-kicker">ADMIN ONLY</span><h1>需要管理员账号</h1><p>请先在阅读端登录管理员账号。公网部署时，管理站还会经过 Cloudflare Access。</p></div>
-        <a className="primary-button" href="/">返回登录</a>
-      </div>
-    );
-  }
 
   return (
     <div className="admin-shell">
@@ -317,14 +221,6 @@ export function AdminApp() {
               <article><span>通过 / 抓取</span><strong>{runRatio(latestRun)}</strong><small>{latestRun ? `去重 ${latestRun.duplicateCount} · 淘汰 ${latestRun.rejectedCount}` : "等待首次采集"}</small></article>
               <article><span>已配置翻译路由</span><strong>{configuredProviders}</strong><small>{configuredProviders ? "密钥只保存在后端" : "请在「模型路由」填写 Key"}</small></article>
             </section>
-            {quotaStatus && (
-              <section className="quota-strip" aria-label="免费额度预警">
-                <div className={quotaStatus.databaseWarning ? "warning" : ""}><span>数据库</span><strong>{Math.round((quotaStatus.databaseBytes ?? 0) / 1024 / 1024)} / 500 MB</strong></div>
-                <div className={quotaStatus.edgeWarning ? "warning" : ""}><span>Edge Functions</span><strong>{Number(quotaStatus.edgeInvocations ?? 0).toLocaleString()} / 500,000</strong></div>
-                <div className={quotaStatus.githubWarning ? "warning" : ""}><span>GitHub Actions</span><strong>{Math.round(quotaStatus.githubMinutes ?? 0)} / 2,000 分钟</strong></div>
-                <div className={quotaStatus.easWarning ? "warning" : ""}><span>EAS Android</span><strong>{Math.round(quotaStatus.easBuilds ?? 0)} / 15 次</strong></div>
-              </section>
-            )}
             <section className="admin-panel pipeline-panel">
               <div className="admin-panel-head">
                 <div>
@@ -382,46 +278,12 @@ export function AdminApp() {
             </section>
           </>
         )}
-        {adminTab === "accounts" && (
-          <section className="admin-panel account-panel">
-            <div className="admin-panel-head"><div><h2>内部账号</h2><p>最多 6 名读者；账号由管理员创建，不收集手机号或真实邮箱。</p></div><span className="route-order">{users.filter((user) => user.role === "reader").length} / 6</span></div>
-            {cloudConfigured ? (
-              <>
-                <form className="account-create-form" onSubmit={createInternalUser}>
-                  <label>用户名<input value={userForm.username} onChange={(event) => setUserForm({ ...userForm, username: event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 24) })} placeholder="例如 lin" required minLength={3} /></label>
-                  <label>显示名<input value={userForm.displayName} onChange={(event) => setUserForm({ ...userForm, displayName: event.target.value.slice(0, 30) })} placeholder="可选" /></label>
-                  <label>英语水平<select value={userForm.cefr} onChange={(event) => setUserForm({ ...userForm, cefr: event.target.value })}>{["A2", "B1", "B2", "C1"].map((level) => <option key={level}>{level}</option>)}</select></label>
-                  <button className="admin-primary" disabled={accountBusy || users.filter((user) => user.role === "reader").length >= 6}>{accountBusy ? "创建中…" : "创建账号"}</button>
-                </form>
-                {issuedCredential && (
-                  <div className="issued-credential" role="status">
-                    <div><span>只显示在当前页面，请安全转交</span><strong>{issuedCredential.username}</strong><code>{issuedCredential.password}</code></div>
-                    <button onClick={() => navigator.clipboard?.writeText(`${issuedCredential.username}\n${issuedCredential.password}`)}>复制账号和密码</button>
-                    <button onClick={() => setIssuedCredential(null)}>关闭</button>
-                  </div>
-                )}
-                <div className="account-list">
-                  {users.map((user) => (
-                    <article key={user.id}>
-                      <div><strong>{user.display_name || user.username}</strong><span>@{user.username} · {user.role === "admin" ? "管理员" : user.cefr} · {user.is_active ? "使用中" : "已停用"}</span></div>
-                      <div className="account-actions">
-                        {user.role !== "admin" && <button onClick={() => toggleInternalUser(user)}>{user.is_active ? "停用" : "启用"}</button>}
-                        {user.role !== "admin" && <button onClick={() => revokeSessions(user)}>撤销会话</button>}
-                        {user.role !== "admin" && <button onClick={() => resetInternalPassword(user)}>重置密码</button>}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </>
-            ) : <p className="provider-empty">本地预览不会创建真实账号；配置 Supabase 后此处会启用管理员建号。</p>}
-          </section>
-        )}
         {adminTab === "models" && (
           <section className="admin-panel">
             <div className="admin-panel-head">
               <div>
                 <h2>模型路由</h2>
-                <p>默认只用 DeepSeek。若找到更便宜、兼容 OpenAI 格式的接口，可在下面添加。密钥保存在本机 `backend/data/provider_overrides.json`，不会写进仓库。</p>
+                <p>默认路由是 DeepSeek，但它可能计费。DeepSeek、cheapApi 和自定义线路都必须显式启用付费、设置正数每日预算与单次上限，并满足请求模式；默认零预算不会调用。密钥只保存在本机。</p>
               </div>
               <span className="route-order">{rankedProviders.filter((provider) => provider.routeRank).map((provider) => PROVIDER_LABELS[provider.provider] ?? provider.provider).join(" → ") || "等待路由状态"}</span>
             </div>
@@ -429,7 +291,7 @@ export function AdminApp() {
               <div className="translation-guard">
                 <span><strong>{cacheHits}</strong> 缓存命中</span>
                 <span><strong>{translationOverview.cache.coalesced}</strong> 重复请求合并</span>
-                <span><strong>{translationOverview.cache.redisConfigured ? "Redis" : "内存"}</strong> 缓存层</span>
+                <span><strong>内存</strong> 缓存层</span>
                 <span><strong>{translationOverview.costGuard.paidProvidersEnabled ? `${translationOverview.costGuard.dailyBudgetCny} 元` : "0 元"}</strong> 每日付费上限</span>
               </div>
             )}
@@ -441,7 +303,7 @@ export function AdminApp() {
                   <span>{provider.enabled ? "动态路由" : "备用"}</span>
                   <span>{provider.averageLatencyMs == null ? "—" : `${provider.averageLatencyMs} ms`}</span>
                   <span>{provider.successes} 成功 / {provider.failures} 失败</span>
-                  <i className={`provider-state ${provider.configured ? provider.status : "not_configured"}`}>{provider.configured ? (provider.status === "degraded" ? "异常" : "已配置") : "未配置"}</i>
+                  <i className={`provider-state ${provider.configured ? provider.status : "not_configured"}`}>{provider.configured ? (provider.status === "blocked_by_zero_budget" ? "付费护栏已阻断" : provider.status === "degraded" ? "异常" : "已配置") : "未配置"}</i>
                 </div>
               ))}
             </div>

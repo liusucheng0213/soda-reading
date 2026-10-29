@@ -28,7 +28,6 @@ jobs:
       - run: npm test
       - run: npm run build:web
       - run: npm run build:admin
-      - run: npm run typecheck:mobile
       - run: pip install -r backend/requirements.txt
       - name: Backend tests
         working-directory: backend

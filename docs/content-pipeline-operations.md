@@ -2,10 +2,11 @@
 
 ## 零费用边界
 
-- 保持 `PAID_PROVIDER_ENABLED=false` 和 `DAILY_PAID_BUDGET_CNY=0`。
-- 免费模型全部失败时，导读生成返回“不可用”，不会自动调用腾讯、百炼、DeepSeek 或硅基流动 72B。
+- 保持 `PAID_PROVIDER_ENABLED=false`、`DAILY_PAID_BUDGET_CNY=0` 和 `PAID_FALLBACK_MODE=never`。
+- 所有 `may_charge=True` 的线路都会被阻断，包括 DeepSeek、cheapApi、自定义 OpenAI 兼容线路、腾讯、百炼和可能计费的硅基流动模型。廉价或自定义不是预算豁免理由。
+- 免费模型全部失败时，导读生成返回“不可用”，不会转而调用被阻断的付费线路。
 - 采集本身只访问公开 API/RSS，不需要代理池、验证码服务或付费搜索 API。
-- 如果未来启用付费路由，必须同时由管理员打开总开关并设置正数预算。
+- 如明确启用付费路由，必须同时打开总开关、设置正数每日预算和单次上限，并满足请求模式。预算是进程内估算预留，不替代供应商控制台的费用上限与告警。
 
 ## 影子采集
 
@@ -19,12 +20,7 @@
 
 ## 调度
 
-Celery Beat 必须只有一个实例。任务时间按 `Asia/Shanghai`：
-
-- `00:15 / 06:15 / 12:15 / 18:15`：增量发现。
-- `21:00`：500–2000 条自适应采集并准备导读。
-- `23:30`：检查每个主题是否至少有 5 个候选。
-- `00:00`：按日期幂等发布；无新内容时继续使用最近 7 天备用池。
+在本机管理站点「采集并发布」。内容库是本地 SQLite（`backend/data/soda_content.db`）。没有定时任务，也没有单独的队列进程。
 
 ## 故障处理
 
@@ -38,14 +34,14 @@ Celery Beat 必须只有一个实例。任务时间按 `Asia/Shanghai`：
 
 ```powershell
 cd backend
-python -m alembic upgrade head
+$env:PYTHONPATH="."
 python -m pytest
-python -m celery -A app.celery_app:celery_app inspect registered
 ```
 
 前端：
 
 ```powershell
 npm test
-npm run build
+npm run build:web
+npm run build:admin
 ```

@@ -1,96 +1,102 @@
-# 免费翻译 API 申请与配置
+# 翻译提供方申请与配置
 
-> 核对日期：2026-07-26。免费政策和可用模型可能调整，正式使用前请再次查看各平台官方页面。
+> 默认模型名以 `backend/app/settings.py` 为准。平台价格、免费额度、模型可用性和限流会变化，使用前请核对官方页面；本文不承诺免费额度或生产 SLA。
 
-## 默认调用顺序
+## 默认路由与费用边界
 
-```text
-智谱 GLM-4.7-Flash 当前免费
-→ 魔搭 ModelScope 每日免费
-→ 硅基流动当前免费模型
-→ 腾讯机器翻译每月循环免费
-→ 阿里百炼新用户限时免费
+词译默认路由是 **DeepSeek**，默认模型是 `deepseek-chat`。DeepSeek 可能计费，因此只保存 API Key 不会让它立即可用。默认配置为：
+
+```dotenv
+PAID_PROVIDER_ENABLED=false
+DAILY_PAID_BUDGET_CNY=0
+PAID_FALLBACK_MODE=never
 ```
 
-智谱当前被官方列为免费模型且翻译能力较好，因此初始置于首位；“免费”不代表无限并发、
-没有平台过载或生产 SLA。运行后路由会按质量、近期成功率和延迟动态排序，拥堵线路会进入
-短时熔断。腾讯机器翻译只返回基础翻译，不作为上下文词义首选。阿里百炼位于最后，避免
-在有长期或循环免费额度时提前消耗 90 天新人额度。
+在这个默认配置下，所有 `may_charge=True` 的线路都会被阻断，包括 DeepSeek、标记为 `cheapApi` 的线路、自定义 OpenAI 兼容线路、未确认免费额度保护的腾讯线路、百炼和可能计费的硅基流动模型。`cheapApi` 只是配置元数据，不是免费或预算豁免。
 
-## 1. 智谱 GLM-4.7-Flash：当前免费，优先申请
+如果明确接受当前阅读端可能产生费用，可以在 `backend/.env` 同时设置：
+
+```dotenv
+PAID_PROVIDER_ENABLED=true
+DAILY_PAID_BUDGET_CNY=5
+PAID_REQUEST_MAX_CNY=0.02
+PAID_FALLBACK_MODE=automatic
+```
+
+`automatic` 是管理员显式允许付费路由的模式，当前阅读端发出的 `qualityMode=free` 请求也可在预算内使用该路由。`manual` 只允许 `qualityMode=precise` 的请求；当前阅读端固定发送 `free`，所以不要在希望阅读端使用 DeepSeek 时选择 `manual`。`never` 始终禁止付费路由。
+
+每日预算和单次上限使用进程内保守估算与预留，不是供应商账单，也不能替代平台控制台的消费上限和告警。后端重启会重置内存中的预留记录。内容生成也检查同一组付费开关和预算；长文生成的估算费用如果超过单次上限，会被拒绝而不是绕过限制。
+
+## 1. DeepSeek：默认提供方
 
 官方入口：
 
-- [GLM-4.7-Flash 免费模型说明](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash)
+- [DeepSeek 开放平台](https://platform.deepseek.com/)
+- [创建 API Key](https://platform.deepseek.com/api_keys)
+
+在 `backend/.env` 填写：
+
+```dotenv
+DEEPSEEK_API_KEY=复制的APIKey
+DEEPSEEK_MODEL=deepseek-chat
+TRANSLATION_PROVIDER_ORDER=deepseek
+PAID_PROVIDER_ENABLED=true
+DAILY_PAID_BUDGET_CNY=5
+PAID_REQUEST_MAX_CNY=0.02
+PAID_FALLBACK_MODE=automatic
+```
+
+接口地址使用 `https://api.deepseek.com`，不要添加 `/v1`。如果不需要付费调用，保持默认付费开关和零预算即可；DeepSeek 不会被请求。
+
+## 2. 智谱 GLM：可选
+
+官方入口：
+
+- [GLM-4.7-Flash 说明](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash)
 - [创建 API Key](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)
 - [API 调用说明](https://docs.bigmodel.cn/cn/guide/develop/http/introduction)
-- [速率限制说明](https://docs.bigmodel.cn/cn/api/rate-limit)
-
-申请步骤：
-
-1. 注册并登录智谱开放平台，按平台要求完成认证。
-2. 打开 API Key 管理页，创建一个项目用 API Key。
-3. 在 `backend/.env` 填写：
+- [速率限制](https://docs.bigmodel.cn/cn/api/rate-limit)
 
 ```dotenv
 ZHIPU_API_KEY=复制的APIKey
 ZHIPU_MODEL=glm-4.7-flash
 ```
 
-`glm-4.7-flash` 当前由官方列为免费模型并适合翻译。官方同时明确说明 API 会按用户权益和
-模型限制并发，高峰期可能出现账户限流或平台过载，所以后面仍然需要保留自动降级路由。
+这是可选线路，不是默认首选。更换模型时应重新核对计费方式；不要仅凭模型名中的 `flash` 推断永远免费。
 
-## 2. 魔搭 ModelScope：每日免费
+## 3. 魔搭 ModelScope：可选
 
 官方入口：
 
-- [ModelScope 首页与注册](https://modelscope.cn/)
+- [ModelScope 首页](https://modelscope.cn/)
 - [创建 Access Token](https://modelscope.cn/my/myaccesstoken)
 - [API-Inference 使用说明](https://modelscope.cn/docs/model-service/API-Inference/intro)
-- [每日额度与限流](https://modelscope.cn/docs/model-service/API-Inference/limits)
-
-申请步骤：
-
-1. 注册并登录 ModelScope。
-2. 按平台提示绑定阿里云账号并完成实名认证。API-Inference 要求完成这两步。
-3. 打开“我的 Access Token”，创建 Token，并立即复制到安全位置。
-4. 在 ModelScope 模型页确认所选模型当前支持 API-Inference；支持状态和模型名以模型页为准。
-5. 在 `backend/.env` 填写：
+- [额度与限流](https://modelscope.cn/docs/model-service/API-Inference/limits)
 
 ```dotenv
 MODELSCOPE_ACCESS_TOKEN=复制的Token
 MODELSCOPE_MODEL=Qwen/Qwen3.5-35B-A3B
 ```
 
-官方明确说明 API-Inference 免费额度、并发和具体模型状态会按资源情况动态调整。该免费
-服务适合开发和低并发 MVP，不承诺生产 SLA；正式商用前应切换到有 SLA 的服务或保留稳定
-机器翻译兜底。
+在模型页确认所选模型支持 API-Inference。免费额度、并发和支持状态以平台当前说明为准。
 
-## 3. 硅基流动：当前免费模型
+## 4. 硅基流动：可选
 
 官方入口：
 
 - [注册与控制台](https://cloud.siliconflow.cn/)
 - [创建 API Key](https://cloud.siliconflow.cn/account/ak)
-- [免费模型说明](https://docs.siliconflow.cn/cn/userguide/introduction)
-- [实名认证说明](https://docs.siliconflow.cn/cn/faqs/authentication)
-- [免费模型限流](https://docs.siliconflow.cn/cn/userguide/rate-limits/rate-limit-and-upgradation)
-
-申请步骤：
-
-1. 注册硅基流动并完成实名认证；免费模型调用需要实名认证。
-2. 打开 API Key 页面，创建并复制密钥。
-3. 在控制台确认模型名称带有“免费”标记。不要把模型改成带 `Pro/` 前缀的付费版本。
-4. 在 `backend/.env` 填写：
+- [模型与使用说明](https://docs.siliconflow.cn/cn/userguide/introduction)
+- [限流说明](https://docs.siliconflow.cn/cn/userguide/rate-limits/rate-limit-and-upgradation)
 
 ```dotenv
 SILICONFLOW_API_KEY=复制的APIKey
 SILICONFLOW_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
 
-免费模型当前调用费用为 0，但有固定限流，平台也可能调整免费模型清单。
+在控制台核对模型价格。代码会把模型名包含 `72b` 的硅基流动线路标为可能计费；更换其他模型时仍应以平台实际计费为准。
 
-## 4. 腾讯机器翻译：每月循环免费兜底
+## 5. 腾讯机器翻译：可选基础翻译
 
 官方入口：
 
@@ -99,27 +105,16 @@ SILICONFLOW_MODEL=Qwen/Qwen2.5-7B-Instruct
 - [SecretId / SecretKey 管理](https://console.cloud.tencent.com/cam/capi)
 - [免费额度与计费](https://cloud.tencent.com/document/product/551/35017)
 
-申请步骤：
-
-1. 注册腾讯云并完成实名认证。
-2. 打开机器翻译控制台，启用“文本翻译”，确认免费资源包已经发放。
-3. 保持“后付费”关闭。这样免费额度用完后会停止调用，不会自动扣费。
-4. 打开访问密钥管理页创建密钥。`SecretKey` 通常只在创建时完整显示一次，请立即保存。
-5. 在 `backend/.env` 填写：
-
 ```dotenv
 TENCENT_SECRET_ID=复制的SecretId
 TENCENT_SECRET_KEY=复制的SecretKey
 TENCENT_REGION=ap-guangzhou
-TENCENT_FREE_QUOTA_GUARDED=true
+TENCENT_FREE_QUOTA_GUARDED=false
 ```
 
-当前文本翻译免费额度为每月 500 万字符，并按月循环发放。它不是大模型上下文翻译，
-因此苏打阅读只把它用于 `basic` 基础词义或句译兜底。只有在你已确认腾讯控制台关闭
-后付费后，才把 `TENCENT_FREE_QUOTA_GUARDED` 设为 `true`；否则代码会把腾讯视为可能
-扣费的路由并在零预算模式下阻断。
+只有在腾讯控制台确认免费额度和后付费保护后，才把 `TENCENT_FREE_QUOTA_GUARDED` 改为 `true`。否则该线路按可能计费处理，并受付费开关和预算阻断。腾讯线路提供基础翻译，不作为上下文词义首选。
 
-## 5. 阿里百炼：90 天新人额度，最后使用
+## 6. 阿里百炼：可选
 
 官方入口：
 
@@ -127,70 +122,39 @@ TENCENT_FREE_QUOTA_GUARDED=true
 - [创建 API Key](https://help.aliyun.com/zh/model-studio/get-api-key/)
 - [新人免费额度规则](https://help.aliyun.com/zh/model-studio/new-free-quota/)
 
-申请步骤：
-
-1. 注册阿里云并完成实名认证，进入百炼控制台，选择中国内地“北京”地域。
-2. 开通模型服务，创建普通按量付费 API Key。不要使用 Coding Plan 或 Token Plan 专用 Key。
-3. 在额度管理中为可用模型打开“免费额度用完即停”。
-4. 在 `backend/.env` 填写：
-
 ```dotenv
 DASHSCOPE_API_KEY=复制的APIKey
 DASHSCOPE_MODEL=qwen-mt-flash
 ```
 
-中国内地新用户的免费额度通常只有 90 天，且不同模型额度分别计算，所以它位于免费
-路由末尾。90 天结束或额度耗尽后，应禁用该路由或确认计费设置。
+百炼线路始终按可能计费处理。即使账号有新人额度，也仍须显式开启付费并设置预算；额度和有效期以控制台为准。
 
-## 写入项目并生效
+## 自定义 OpenAI 兼容线路
 
-在项目根目录执行：
+管理站的「模型路由」可以添加兼容 `POST /chat/completions` 的端点。接口地址通常填到 `/v1`，模型名以供应商文档为准。自定义线路一律按 `may_charge=True` 处理，`cheapApi` 不会豁免付费开关、每日预算、单次上限或请求模式。
 
-```powershell
-if (-not (Test-Path backend\.env)) { Copy-Item backend\.env.example backend\.env }
-notepad backend\.env
-```
+密钥保存在本机 `backend/data/provider_overrides.json`，该文件已忽略。不要把密钥写入前端环境变量、源码或文档。
 
-最少先申请智谱；为提高成功率，建议再配置 ModelScope 和硅基流动。最终顺序保持：
+## 路由顺序与生效
+
+默认只有：
 
 ```dotenv
-TRANSLATION_PROVIDER_ORDER=zhipu,modelscope,siliconflow,tencent,dashscope
+TRANSLATION_PROVIDER_ORDER=deepseek
 ```
 
-保存后重启后端：
+如果已配置并确认使用可选线路，可以显式写成：
+
+```dotenv
+TRANSLATION_PROVIDER_ORDER=deepseek,zhipu,modelscope
+```
+
+动态路由会结合配置顺序、近期成功率和延迟排序，拥堵线路会短时熔断。保存后重启后端：
 
 ```powershell
 cd backend
+$env:PYTHONPATH="."
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-打开 `http://127.0.0.1:8000/admin/providers` 可以查看每个平台是否已配置、近期成功率和
-限流状态；`http://127.0.0.1:8000/admin/translation` 会显示缓存命中、重复请求合并和
-付费保护状态。两个接口都不会返回密钥。
-
-## 速度与费用保护
-
-推荐同时配置 Redis，让缓存跨进程和重启复用：
-
-```dotenv
-REDIS_URL=redis://127.0.0.1:6379/2
-TRANSLATION_CACHE_TTL_SECONDS=2592000
-TRANSLATION_DYNAMIC_ROUTING=true
-```
-
-同一上下文只调用一次；并发的相同请求会合并，成功结果先写内存再写 Redis。默认请求使用
-`qualityMode=free`，即使服务器保存了付费密钥也不会调用付费模型。若未来确实要启用付费
-兜底，需要同时设置非零预算、单次上限和回退模式：
-
-```dotenv
-PAID_PROVIDER_ENABLED=true
-DAILY_PAID_BUDGET_CNY=5
-PAID_REQUEST_MAX_CNY=0.02
-PAID_FALLBACK_MODE=manual
-```
-
-`manual` 只允许用户明确选择“精确翻译”时调用付费路由；`never` 是默认值。不要在没有
-Redis、用量告警和控制台扣费上限时开启 `automatic`。
-
-不要把密钥粘贴到聊天、前端 `.env`、`src/` 或浏览器代码中。密钥只能保存在
-`backend/.env` 或部署服务器的后端环境变量中。
+`/admin/providers` 展示配置、阻断和运行状态，`/admin/translation` 展示缓存与付费保护；接口不会返回完整密钥。翻译记忆在后端进程内存和浏览器本地，相同并发请求会合并。

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .settings import DEFAULT_DEEPSEEK_MODEL, DEFAULT_MODELSCOPE_MODEL, DEFAULT_ZHIPU_MODEL
+
 
 OVERRIDES_PATH = Path(__file__).resolve().parent.parent / "data" / "provider_overrides.json"
 
@@ -13,7 +15,7 @@ PROVIDER_PRESETS = [
         "label": "DeepSeek",
         "kind": "openai",
         "baseUrl": "https://api.deepseek.com",
-        "model": "deepseek-chat",
+        "model": DEFAULT_DEEPSEEK_MODEL,
         "help": "在 platform.deepseek.com 创建 API Key。推荐模型 deepseek-chat，不要用 reasoner。接口地址填 https://api.deepseek.com，不要加 /v1。",
         "cheapApi": True,
     },
@@ -22,7 +24,7 @@ PROVIDER_PRESETS = [
         "label": "智谱 GLM",
         "kind": "openai",
         "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
-        "model": "glm-4-flash",
+        "model": DEFAULT_ZHIPU_MODEL,
         "help": "在 open.bigmodel.cn 创建 Key。免费闪模型可填 glm-4-flash 或 glm-4.7-flash。地址填 https://open.bigmodel.cn/api/paas/v4。",
         "cheapApi": False,
     },
@@ -31,7 +33,7 @@ PROVIDER_PRESETS = [
         "label": "魔搭 ModelScope",
         "kind": "openai",
         "baseUrl": "https://api-inference.modelscope.cn/v1",
-        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "model": DEFAULT_MODELSCOPE_MODEL,
         "help": "在 modelscope.cn 创建 Access Token。地址填 https://api-inference.modelscope.cn/v1，模型填平台上的模型 ID。",
         "cheapApi": False,
     },

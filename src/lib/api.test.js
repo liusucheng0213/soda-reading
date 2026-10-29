@@ -158,4 +158,19 @@ describe("word translation API contract", () => {
       vi.useRealTimers();
     }
   });
+
+  it("keeps preference updates browser-local even with a backend session", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { saveProfile } = await import("./api.js");
+    const profile = { level: "B2", topics: ["文化"], minutes: 10, reminder: "20:30" };
+
+    await expect(saveProfile(profile, "backend-issued-token")).resolves.toEqual(profile);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a password-change success no-op", async () => {
+    const api = await import("./api.js");
+    expect(api.changePassword).toBeUndefined();
+  });
 });

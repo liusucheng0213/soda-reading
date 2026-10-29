@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, inspect, or_, select, text
+from sqlalchemy import delete, or_, select
 
 from .content_editorial import EditorialGateway, EditorialUnavailable, LEVEL_TARGETS
 from .content_sources import (
@@ -662,26 +662,7 @@ class ContentPipeline:
         return flags
 
     def active_cefr_levels(self) -> list[str]:
-        configured = self.settings.configured_cefr_levels
-        try:
-            if inspect(self.database.engine).has_table("profiles"):
-                with self.database.session() as session:
-                    active = {
-                        str(level).upper()
-                        for level in session.execute(
-                            text(
-                                "select distinct cefr from profiles "
-                                "where is_active = true and cefr in ('A2','B1','B2','C1')"
-                            )
-                        ).scalars()
-                    }
-                selected = [level for level in configured if level in active]
-                if selected:
-                    return selected
-        except Exception:
-            # The local SQLite preview intentionally has no account schema.
-            pass
-        return configured
+        return self.settings.configured_cefr_levels
 
     async def _generate(self, cluster_ids: list[str]) -> int:
         generated = await self._materialize_original_articles(cluster_ids)

@@ -3,18 +3,25 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
+DEFAULT_ZHIPU_MODEL = "glm-4.7-flash"
+DEFAULT_MODELSCOPE_MODEL = "Qwen/Qwen3.5-35B-A3B"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "development"
-    dev_sms_code: str = "246810"
+    dev_sms_code: str = ""
+    local_admin_username: str = "admin"
+    local_admin_password: str = ""
     admin_api_token: str = ""
     allowed_origins: str = "http://localhost:4173,http://127.0.0.1:4173"
 
     modelscope_access_token: str = ""
-    modelscope_model: str = "Qwen/Qwen3.5-35B-A3B"
+    modelscope_model: str = DEFAULT_MODELSCOPE_MODEL
     zhipu_api_key: str = ""
-    zhipu_model: str = "glm-4.7-flash"
+    zhipu_model: str = DEFAULT_ZHIPU_MODEL
     siliconflow_api_key: str = ""
     siliconflow_model: str = "Qwen/Qwen2.5-7B-Instruct"
     tencent_secret_id: str = ""
@@ -23,11 +30,10 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""
     dashscope_model: str = "qwen-mt-flash"
     deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = DEFAULT_DEEPSEEK_MODEL
     translation_provider_order: str = "deepseek"
     translation_provider_timeout_ms: int = 8000
     translation_total_timeout_ms: int = 12000
-    redis_url: str = ""
     translation_cache_ttl_seconds: int = 2_592_000
     translation_failure_ttl_seconds: int = 8
     translation_memory_cache_entries: int = 5_000
@@ -36,8 +42,6 @@ class Settings(BaseSettings):
     paid_fallback_mode: str = "never"
     paid_request_max_cny: float = 0.02
     database_url: str = "sqlite:///./data/soda_content.db"
-    celery_broker_url: str = "redis://127.0.0.1:6379/0"
-    celery_result_backend: str = "redis://127.0.0.1:6379/1"
 
     paid_provider_enabled: bool = False
     daily_paid_budget_cny: float = 0
@@ -51,8 +55,8 @@ class Settings(BaseSettings):
     content_source_timeout_seconds: float = 25
     content_per_domain_concurrency: int = 2
     content_auto_publish: bool = True
-    content_user_agent: str = "SodaReading/0.1 (English reading prototype; +https://github.com/soda-reading; soda-reading-bot@outlook.com)"
-    content_contact_email: str = "soda-reading-bot@outlook.com"
+    content_user_agent: str = "SodaReading/0.1 (English reading prototype; +https://github.com/liusucheng0213/soda-reading)"
+    content_contact_email: str = ""
     editorial_provider_order: str = "deepseek,zhipu,modelscope"
     editorial_provider_timeout_ms: int = 30000
     editorial_total_timeout_ms: int = 75000

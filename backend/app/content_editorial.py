@@ -39,10 +39,10 @@ class EditorialUnavailable(RuntimeError):
 
 
 class EditorialGateway:
-    """Free-only article writer. Paid providers are intentionally absent."""
-
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._paid_budget_lock = asyncio.Lock()
+        self._paid_reserved_cny: dict[str, float] = {}
         definitions = {
             "zhipu": EditorialProvider(
                 "zhipu", "https://open.bigmodel.cn/api/paas/v4", settings.zhipu_model, settings.zhipu_api_key
@@ -67,12 +67,7 @@ class EditorialGateway:
         self.providers = [
             definitions[name]
             for name in settings.editorial_order
-            if name in definitions
-            and (
-                settings.paid_provider_enabled
-                or not definitions[name].may_charge
-                or definitions[name].cheap_api
-            )
+            if name in definitions and self._route_allowed(definitions[name])
         ]
         self.cooldown_until: dict[str, float] = {}
         base_quality = {"zhipu": 0.96, "deepseek": 0.95, "modelscope": 0.88, "siliconflow": 0.65}
@@ -99,6 +94,33 @@ class EditorialGateway:
             return metric["quality"] * 0.5 + success_rate * 0.3 + latency_score * 0.2
 
         return sorted(self.providers, key=score, reverse=True)
+
+    def _route_allowed(self, provider: EditorialProvider) -> bool:
+        if not provider.may_charge:
+            return True
+        return (
+            self.settings.paid_provider_enabled
+            and self.settings.daily_paid_budget_cny > 0
+            and self.settings.paid_request_max_cny > 0
+        )
+
+    async def _reserve_paid_usage(self, provider: EditorialProvider, body: dict) -> None:
+        if not provider.may_charge:
+            return
+        if not self._route_allowed(provider):
+            raise EditorialUnavailable("付费内容模型未启用或预算未配置")
+        serialized = json.dumps(body, ensure_ascii=False)
+        estimated_tokens = max(1, len(serialized) / 4) + int(body.get("max_tokens") or 0)
+        cny_per_million = {"deepseek": 8.0, "siliconflow": 8.0}.get(provider.name, 10.0)
+        estimate = max(0.0001, estimated_tokens * cny_per_million / 1_000_000)
+        if estimate > self.settings.paid_request_max_cny:
+            raise EditorialUnavailable("本次内容生成预计费用超过单次上限")
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        async with self._paid_budget_lock:
+            spent = self._paid_reserved_cny.get(day, 0)
+            if spent + estimate > self.settings.daily_paid_budget_cny:
+                raise EditorialUnavailable("今日付费内容生成预算已用完")
+            self._paid_reserved_cny[day] = spent + estimate
 
     async def generate(self, topic: str, level: str, evidence: list[dict[str, Any]]) -> dict:
         if level not in LEVEL_TARGETS:
@@ -138,7 +160,7 @@ class EditorialGateway:
             except (ValueError, KeyError, json.JSONDecodeError):
                 self.metrics[provider.name]["failures"] += 1
                 self.cooldown_until[provider.name] = time.monotonic() + 10
-        raise EditorialUnavailable("所有免费内容模型当前不可用，已保留备用文章池")
+        raise EditorialUnavailable("所有可用内容模型当前不可用，已保留备用文章池")
 
     async def intro_zh(self, *, title: str, source: str, topic: str, paragraphs: list[str]) -> str:
         excerpt = " ".join(paragraphs)[:1200]
@@ -235,6 +257,7 @@ class EditorialGateway:
             body["thinking"] = {"type": "disabled"}
         if provider.name == "modelscope":
             body["enable_thinking"] = False
+        await self._reserve_paid_usage(provider, body)
         async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
             response = await client.post(
                 "/chat/completions",
@@ -306,6 +329,7 @@ class EditorialGateway:
         }
         if provider.name in {"zhipu", "deepseek"}:
             body["thinking"] = {"type": "disabled"}
+        await self._reserve_paid_usage(provider, body)
         async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
             response = await client.post(
                 "/chat/completions",
@@ -380,6 +404,7 @@ class EditorialGateway:
             body["thinking"] = {"type": "disabled"}
         if provider.name == "modelscope":
             body["enable_thinking"] = False
+        await self._reserve_paid_usage(provider, body)
         async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
             response = await client.post(
                 "/chat/completions",

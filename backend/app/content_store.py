@@ -218,8 +218,6 @@ class ContentDatabase:
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
 
     def initialize(self) -> None:
-        # Supabase SQL migrations are the production schema authority. Creating
-        # tables from ORM metadata remains useful for isolated SQLite tests only.
         if self.settings.app_env == "development" or self.settings.database_url.startswith("sqlite"):
             Base.metadata.create_all(self.engine)
             inspector = inspect(self.engine)

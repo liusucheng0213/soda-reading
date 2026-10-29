@@ -27,18 +27,9 @@ import {
 } from "./data.js";
 import {
   getDailyFeed,
-  changePassword,
-  cloudConfigured,
-  deleteSyncedVocabulary,
-  loadSyncedVocabulary,
-  loadSyncedProgress,
   loginWithPassword,
   logout,
-  restoreSession,
-  reviewSyncedVocabulary,
   saveProfile,
-  saveSyncedProgress,
-  saveSyncedVocabulary,
 } from "./lib/api.js";
 import { dueCards, REVIEW_RATINGS, scheduleReview } from "@soda-reading/core";
 import { inspectAndParseFile } from "./lib/importers.js";
@@ -51,12 +42,8 @@ import {
   freshnessLabel,
   glossText,
   isCurrentSave,
-  mergeRemoteProgress,
-  mergeVocabulary,
-  vocabularyRemoteSave,
   remainingMinutes,
   resumeFromProgress,
-  shouldFlushProgressOnHide,
   todayReadMinutes,
   uniqueArticles,
   vocabSource,
@@ -144,8 +131,7 @@ export function App() {
 function SodaApp() {
   const [session, setSession] = usePersistentState("soda.session", null);
   const [profile, setProfile] = usePersistentState("soda.profile", null);
-  const [authReady, setAuthReady] = useState(!cloudConfigured);
-  const [syncState, setSyncState] = useState(cloudConfigured ? "正在连接云端…" : "本地开发模式");
+  const [syncState, setSyncState] = useState("本地开发模式");
   const [theme, setTheme] = usePersistentState("soda.theme", "day");
   const [readingPrefs, setReadingPrefs] = usePersistentState("soda.readingPrefs", defaultReadingPrefs);
   const accountName = profile?.username || "";
@@ -163,76 +149,14 @@ function SodaApp() {
   const [vocabReviewing, setVocabReviewing] = useState(false);
   const [vocabRevealed, setVocabRevealed] = useState(false);
   const [closedArticleId, setClosedArticleId] = useState("");
-  const progressSyncRef = useRef({ timer: 0, payload: null });
   const profileSaveRef = useRef(0);
-
-  const flushProgressSync = () => {
-    window.clearTimeout(progressSyncRef.current.timer);
-    const payload = progressSyncRef.current.payload;
-    progressSyncRef.current.payload = null;
-    if (!payload) return;
-    saveSyncedProgress(payload).catch(() => setSyncState("阅读进度待同步"));
-  };
-
-  const queueProgressSync = (payload) => {
-    progressSyncRef.current.payload = payload;
-    window.clearTimeout(progressSyncRef.current.timer);
-    progressSyncRef.current.timer = window.setTimeout(flushProgressSync, 600);
-  };
-
-  const flushProgressSyncRef = useRef(flushProgressSync);
-  flushProgressSyncRef.current = flushProgressSync;
-
-  useEffect(() => {
-    const onHide = (event) => {
-      if (shouldFlushProgressOnHide(event)) flushProgressSyncRef.current();
-    };
-    document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("pagehide", onHide);
-    return () => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("pagehide", onHide);
-      window.clearTimeout(progressSyncRef.current.timer);
-      const payload = progressSyncRef.current.payload;
-      progressSyncRef.current.payload = null;
-      if (payload) saveSyncedProgress(payload).catch(() => {});
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!cloudConfigured) return;
-    let active = true;
-    restoreSession()
-      .then((restored) => {
-        if (!active) return;
-        if (restored) {
-          setSession(restored.session);
-          setProfile(restored.profile);
-          setSyncState("云端已同步");
-        } else {
-          setSession(null);
-          setProfile(null);
-          setSyncState("等待登录");
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setSession(null);
-          setProfile(null);
-          setSyncState("云端暂时不可用");
-        }
-      })
-      .finally(() => active && setAuthReady(true));
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     listLocalDocuments().then(setDocuments).catch(() => setDocuments([]));
   }, []);
 
   useEffect(() => {
+    if (!profile) return;
     const shown = displayFeed(feed, profile, fallbackLibrary);
     const catalog = uniqueArticles([
       shown.primary,
@@ -246,41 +170,21 @@ function SodaApp() {
   }, [feed, profile, documents, progress, resume]);
 
   useEffect(() => {
-    if (!session?.accessToken || profile?.mustChangePassword) return undefined;
+    if (!session?.accessToken) return undefined;
     let active = true;
     getDailyFeed(session.accessToken, profile).then((next) => {
       if (active) setFeed(next);
     }).catch(() => undefined);
-    if (cloudConfigured) {
-      loadSyncedVocabulary()
-        .then((items) => {
-          if (!active || !items) return;
-          setVocabulary((current) => mergeVocabulary(current, items));
-          setSyncState("云端已同步");
-        })
-        .catch(() => {
-          if (active) setSyncState("离线使用 · 稍后同步");
-        });
-      loadSyncedProgress()
-        .then((rows) => {
-          if (!active || !rows?.length) return;
-          setProgress((current) => mergeRemoteProgress(current, rows));
-          setSyncState("云端已同步");
-        })
-        .catch(() => {
-          if (active) setSyncState("阅读进度待同步");
-        });
-    }
     return () => {
       active = false;
     };
-  }, [session?.accessToken, profile?.mustChangePassword]);
+  }, [session?.accessToken]);
 
   const authenticate = ({ session: nextSession, profile: nextProfile }) => {
     setSession(nextSession);
     setProfile(nextProfile);
     setLoginHint(null);
-    setSyncState(nextSession.cloud ? "云端已同步" : "本地开发模式");
+    setSyncState("本地开发模式");
   };
 
   const updateProfile = (next) => {
@@ -288,85 +192,39 @@ function SodaApp() {
     const generation = profileSaveRef.current + 1;
     profileSaveRef.current = generation;
     setProfile(value);
-    setSyncState("正在同步设置…");
-    saveProfile(value, session?.accessToken)
+    setSyncState("正在保存设置…");
+    saveProfile(value)
       .then(async (saved) => {
         if (!isCurrentSave(generation, profileSaveRef.current)) return;
         const merged = { ...value, ...saved, onboarded: true };
         setProfile(merged);
-        setSyncState(cloudConfigured ? "云端已同步" : "本地已保存");
+        setSyncState("本地已保存");
         if (!session?.accessToken) return;
         const nextFeed = await getDailyFeed(session.accessToken, merged);
         if (!isCurrentSave(generation, profileSaveRef.current)) return;
         setFeed(nextFeed);
       })
       .catch(() => {
-        if (isCurrentSave(generation, profileSaveRef.current)) setSyncState("设置待同步");
+        if (isCurrentSave(generation, profileSaveRef.current)) setSyncState("设置未保存");
       });
   };
 
   const updateVocabulary = (next) => {
-    const previous = vocabulary;
     setVocabulary(next);
-    const added = next.filter((item) => !previous.some((old) => old.id === item.id));
-    const removed = previous.filter((item) => !next.some((current) => current.id === item.id));
-    for (const item of added) {
-      saveSyncedVocabulary(item)
-        .then((saved) => {
-          if (!saved?.id) return;
-          setVocabulary((current) => {
-            const outcome = vocabularyRemoteSave(current, item.id, saved.id);
-            queueMicrotask(() => {
-              if (!outcome.deletedRemoteId) {
-                setSyncState("云端已同步");
-                return;
-              }
-              deleteSyncedVocabulary({ remoteId: outcome.deletedRemoteId })
-                .catch(() => setSyncState("删除待同步"));
-            });
-            return outcome.items;
-          });
-        })
-        .catch(() => setSyncState("生词待同步"));
-    }
-    for (const item of removed) {
-      deleteSyncedVocabulary(item).catch(() => setSyncState("删除待同步"));
-    }
   };
 
-  const reviewVocabulary = (item, rating, after) => {
+  const reviewVocabulary = (item, _rating, after) => {
     setVocabulary((current) => current.map((entry) =>
       entry.id === item.id ? { ...entry, card: after } : entry
     ));
-    reviewSyncedVocabulary(item, rating)
-      .then(() => setSyncState("复习进度已同步"))
-      .catch(() => setSyncState("复习进度待同步"));
   };
 
-  if (!authReady) return <div className="entry-shell auth-loading">正在安全连接苏打阅读…</div>;
   if (!session) {
     return (
       <LoginScreen
         initialUsername={loginHint?.username ?? ""}
         notice={loginHint?.message ?? ""}
         onAuthenticated={authenticate}
-      />
-    );
-  }
-  if (profile?.mustChangePassword) {
-    return (
-      <PasswordChangeScreen
-        username={profile.username}
-        onChanged={async () => {
-          const username = profile.username;
-          await logout().catch(() => undefined);
-          setSession(null);
-          setProfile(null);
-          setLoginHint({
-            username,
-            message: "密码已更新。为了撤销临时密码会话，请用新密码重新登录一次。",
-          });
-        }}
       />
     );
   }
@@ -389,7 +247,6 @@ function SodaApp() {
         onReadingPrefsChange={setReadingPrefs}
         onThemeChange={setTheme}
         onBack={() => {
-          flushProgressSync();
           setActiveArticle(null);
           setReaderFocus(null);
         }}
@@ -405,13 +262,6 @@ function SodaApp() {
           setProgress((current) => ({ ...current, [activeArticle.id]: value }));
           setReadingDay((log) => applyReadingProgress(log, activeArticle, previous, value));
           setResume((current) => current ? { ...current, progress: value } : current);
-          queueProgressSync({
-            contentHash: activeArticle.contentHash ?? activeArticle.id,
-            contentId: activeArticle.id,
-            chapterId: "body",
-            location: { progress: value },
-            progress: value,
-          });
         }}
       />
     );
@@ -552,46 +402,7 @@ function LoginScreen({ onAuthenticated, initialUsername = "", notice = "" }) {
         {status.error && <p className="form-error">{status.error}</p>}
         <button className="primary-button" type="submit" disabled={!username || !password || status.loading}>{status.loading ? "正在登录…" : "登录并开始阅读"}</button>
       </form>
-      {import.meta.env.DEV && !cloudConfigured && <p className="demo-code">本地预览：admin / Soda-local-2026!</p>}
-    </div>
-  );
-}
-
-function PasswordChangeScreen({ username, onChanged }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [status, setStatus] = useState({ loading: false, error: "" });
-
-  const submit = async (event) => {
-    event.preventDefault();
-    if (password !== confirm) {
-      setStatus({ loading: false, error: "两次输入的密码不一致" });
-      return;
-    }
-    setStatus({ loading: true, error: "" });
-    try {
-      await changePassword(password);
-      onChanged();
-    } catch (error) {
-      setStatus({ loading: false, error: error.message });
-    }
-  };
-
-  return (
-    <div className="entry-shell auth-screen password-change-screen">
-      <div className="auth-brand">
-        <span className="brand-kicker">FIRST SIGN IN</span>
-        <h1>设置自己的密码</h1>
-        <p>{username}，临时密码只用于这一次登录。</p>
-      </div>
-      <form className="auth-form" onSubmit={submit}>
-        <label htmlFor="new-password">新密码</label>
-        <input id="new-password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 16 位，含大小写、数字和符号" />
-        <label htmlFor="confirm-password">再次输入</label>
-        <input id="confirm-password" type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="确认新密码" />
-        {status.error && <p className="form-error">{status.error}</p>}
-        <button className="primary-button" disabled={!password || !confirm || status.loading}>{status.loading ? "正在保存…" : "保存并继续"}</button>
-      </form>
+      {import.meta.env.DEV && <p className="demo-code">本地预览账号写在 .env 的 VITE_LOCAL_ADMIN_USERNAME 与 VITE_LOCAL_ADMIN_PASSWORD。</p>}
     </div>
   );
 }

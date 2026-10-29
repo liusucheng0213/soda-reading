@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from secrets import compare_digest, token_urlsafe
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,12 +12,10 @@ from .schemas import (
     ContentRunRequest,
     PasswordLoginRequest,
     Preferences,
-    ProgressRequest,
     ProviderConfigRequest,
     SmsSendRequest,
     SmsVerifyRequest,
     TranslationRequest,
-    VocabularyRequest,
 )
 from .settings import Settings, get_settings
 from .translation import TranslationGateway, TranslationUnavailable
@@ -36,9 +35,6 @@ app.add_middleware(
 
 sms_requests: dict[str, datetime] = {}
 sessions: dict[str, dict] = {}
-profiles: dict[str, dict] = {}
-progress_store: dict[str, dict] = {}
-vocabulary_store: dict[str, list[dict]] = {}
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict:
@@ -92,7 +88,7 @@ async def send_sms(payload: SmsSendRequest) -> dict:
         )
     sms_requests[payload.phone] = datetime.now(timezone.utc) + timedelta(minutes=5)
     response = {"requestId": token_urlsafe(12), "expiresIn": 300, "provider": "development"}
-    if settings.app_env == "development":
+    if settings.dev_sms_code:
         response["devCode"] = settings.dev_sms_code
     return response
 
@@ -109,12 +105,16 @@ async def verify_sms(payload: SmsVerifyRequest) -> dict:
             },
         )
     expires = sms_requests.get(payload.phone)
-    if not expires or expires < datetime.now(timezone.utc) or payload.code != settings.dev_sms_code:
+    if (
+        not settings.dev_sms_code
+        or not expires
+        or expires < datetime.now(timezone.utc)
+        or payload.code != settings.dev_sms_code
+    ):
         raise HTTPException(status_code=400, detail="验证码错误或已过期")
     token = token_urlsafe(32)
     user = {"id": f"user-{payload.phone[-4:]}", "phone": payload.phone}
     sessions[token] = user
-    profiles.setdefault(user["id"], Preferences().model_dump())
     return {"accessToken": token, "user": user}
 
 
@@ -122,47 +122,38 @@ async def verify_sms(payload: SmsVerifyRequest) -> dict:
 async def password_login(payload: PasswordLoginRequest) -> dict:
     username = payload.username.strip().lower()
     if settings.app_env != "development":
-        raise HTTPException(status_code=503, detail="请使用云端账号登录")
-    if username != "admin" or payload.password != "Soda-local-2026!":
+        raise HTTPException(status_code=503, detail="本地密码登录仅用于开发环境")
+    expected_username = settings.local_admin_username.strip().lower()
+    expected_password = settings.local_admin_password
+    if not expected_password or username != expected_username or payload.password != expected_password:
         raise HTTPException(status_code=401, detail="用户名或密码不正确")
     token = token_urlsafe(32)
-    user = {"id": "local-admin", "username": "admin"}
+    user = {"id": "local-admin", "username": expected_username}
     sessions[token] = user
-    profiles.setdefault(user["id"], Preferences(level="B1", topics=["科技", "文化"]).model_dump())
     return {
         "accessToken": token,
         "user": user,
         "profile": {
-            "username": "admin",
+            "username": expected_username,
             "role": "admin",
             "level": "B1",
             "topics": ["科技", "文化"],
             "minutes": 10,
             "reminder": "20:30",
             "reviewLimit": 20,
-            "mustChangePassword": False,
             "onboarded": True,
         },
     }
 
 
-@app.get("/profile/preferences")
-async def get_preferences(user: dict = Depends(current_user)) -> dict:
-    return profiles.setdefault(user["id"], Preferences().model_dump())
-
-
-@app.put("/profile/preferences")
-async def put_preferences(payload: Preferences, user: dict = Depends(current_user)) -> dict:
-    profiles[user["id"]] = payload.model_dump()
-    return profiles[user["id"]]
-
-
 @app.get("/feed/daily")
-async def feed(user: dict = Depends(current_user)) -> dict:
-    return content_service.daily_feed(
-        profiles.setdefault(user["id"], Preferences().model_dump()),
-        user["id"],
-    )
+async def feed(
+    level: Literal["A2", "B1", "B2", "C1"] = "B1",
+    topics: list[str] = Query(default=["科技", "文化"], min_length=1, max_length=4),
+    user: dict = Depends(current_user),
+) -> dict:
+    preferences = Preferences(level=level, topics=topics)
+    return content_service.daily_feed(preferences.model_dump(), user["id"])
 
 
 @app.post("/translations/word")
@@ -195,30 +186,6 @@ async def sentence_translation(payload: TranslationRequest) -> dict:
                 "retryable": True,
             },
         ) from error
-
-
-@app.put("/reading-progress")
-async def save_progress(payload: ProgressRequest, user: dict = Depends(current_user)) -> dict:
-    key = f"{user['id']}:{payload.contentHash or payload.contentId}"
-    progress_store[key] = payload.model_dump()
-    return {"saved": True, **progress_store[key]}
-
-
-@app.post("/vocabulary")
-async def save_vocabulary(payload: VocabularyRequest, user: dict = Depends(current_user)) -> dict:
-    items = vocabulary_store.setdefault(user["id"], [])
-    item = payload.model_dump()
-    same = next((
-        index for index, existing in enumerate(items)
-        if existing["contentId"] == item["contentId"]
-        and existing["word"].lower() == item["word"].lower()
-        and existing.get("sentence", "") == item.get("sentence", "")
-    ), None)
-    if same is None:
-        items.append(item)
-    else:
-        items[same] = item
-    return {"saved": True, "count": len(items), "item": item}
 
 
 @app.get("/admin/sources", dependencies=[Depends(require_admin)])

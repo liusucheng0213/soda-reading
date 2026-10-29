@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from redis.asyncio import Redis
 
 from .provider_config import load_overrides
 from .settings import Settings
@@ -141,24 +140,11 @@ class TranslationGateway:
         self.cooldown_until: dict[str, float] = {}
         self.cache_metrics = {
             "memoryHits": 0,
-            "redisHits": 0,
             "misses": 0,
             "coalesced": 0,
             "writes": 0,
             "negativeHits": 0,
         }
-        self._redis_disabled_until = 0.0
-        self._redis = (
-            Redis.from_url(
-                settings.redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=0.08,
-                socket_timeout=0.08,
-            )
-            if settings.redis_url
-            else None
-        )
         self._http = httpx.AsyncClient(
             timeout=None,
             limits=httpx.Limits(max_keepalive_connections=8, max_connections=16),
@@ -288,9 +274,8 @@ class TranslationGateway:
                     else "blocked_by_zero_budget"
                     if (
                         provider.configured
-                        and provider.name in settings.provider_order
+                        and provider.name in self._provider_position
                         and provider.may_charge
-                        and not provider.cheap_api
                     )
                     else "not_configured"
                 ),
@@ -356,9 +341,13 @@ class TranslationGateway:
     def _route_allowed(self, provider: Provider | None = None) -> bool:
         if provider is None:
             return False
-        if not provider.may_charge or provider.cheap_api:
+        if not provider.may_charge:
             return True
-        return self.settings.paid_provider_enabled
+        return (
+            self.settings.paid_provider_enabled
+            and self.settings.daily_paid_budget_cny > 0
+            and self.settings.paid_request_max_cny > 0
+        )
 
     def _provider_timeout_ms(self, provider: Provider, scope: str = "word") -> int:
         base = max(200, self.settings.translation_provider_timeout_ms)
@@ -405,7 +394,6 @@ class TranslationGateway:
             "cache": {
                 **self.cache_metrics,
                 "memoryEntries": len(self.cache),
-                "redisConfigured": self._redis is not None,
                 "ttlSeconds": self.settings.translation_cache_ttl_seconds,
             },
             "costGuard": {
@@ -441,16 +429,6 @@ class TranslationGateway:
         if cached:
             self.cache_metrics["memoryHits"] += 1
             return {**cached, "cached": True, "cacheLayer": "memory", "latencyMs": 0}
-        if self._redis and time.monotonic() >= self._redis_disabled_until:
-            try:
-                raw = await self._redis.get(f"soda:translation:{key}")
-                if raw:
-                    value = json.loads(raw)
-                    self._memory_set(key, value)
-                    self.cache_metrics["redisHits"] += 1
-                    return {**value, "cached": True, "cacheLayer": "redis", "latencyMs": 0}
-            except Exception:
-                self._redis_disabled_until = time.monotonic() + 30
         self.cache_metrics["misses"] += 1
         return None
 
@@ -459,15 +437,6 @@ class TranslationGateway:
         stored.pop("cacheLayer", None)
         self._memory_set(key, stored)
         self.cache_metrics["writes"] += 1
-        if self._redis and time.monotonic() >= self._redis_disabled_until:
-            try:
-                await self._redis.set(
-                    f"soda:translation:{key}",
-                    json.dumps(stored, ensure_ascii=False),
-                    ex=self.settings.translation_cache_ttl_seconds,
-                )
-            except Exception:
-                self._redis_disabled_until = time.monotonic() + 30
 
     async def translate(self, scope: str, payload: dict) -> dict:
         key = self._key(scope, payload)
@@ -476,7 +445,7 @@ class TranslationGateway:
             return cached
         if self.failure_cache.get(key, 0) > time.monotonic():
             self.cache_metrics["negativeHits"] += 1
-            raise TranslationUnavailable("免费翻译线路繁忙，请稍后重试")
+            raise TranslationUnavailable("翻译线路繁忙，请稍后重试")
         self.failure_cache.pop(key, None)
 
         existing = self.inflight.get(key)
@@ -504,7 +473,7 @@ class TranslationGateway:
         started = time.perf_counter()
         paid_reservation = 0.0
         try:
-            if provider.may_charge and not provider.cheap_api:
+            if provider.may_charge:
                 paid_reservation = await self._reserve_paid_usage(provider, payload)
             result = await asyncio.wait_for(self._call_provider(provider, scope, payload), timeout=timeout)
             result = self._validate_result(scope, result, provider)
@@ -545,7 +514,7 @@ class TranslationGateway:
         for provider in self._ranked_providers():
             if not provider.configured:
                 continue
-            if provider.may_charge and not provider.cheap_api and not self._paid_provider_allowed(payload):
+            if provider.may_charge and not self._paid_provider_allowed(payload):
                 continue
             cooldown_until = self.cooldown_until.get(provider.name, 0)
             if cooldown_until > time.monotonic():
@@ -623,12 +592,16 @@ class TranslationGateway:
         raise TranslationUnavailable("当前翻译服务暂时不可用，请稍后重试")
 
     def _paid_provider_allowed(self, payload: dict) -> bool:
-        if not self.settings.paid_provider_enabled or self.settings.daily_paid_budget_cny <= 0:
+        if (
+            not self.settings.paid_provider_enabled
+            or self.settings.daily_paid_budget_cny <= 0
+            or self.settings.paid_request_max_cny <= 0
+        ):
             return False
         mode = self.settings.paid_fallback_mode.strip().lower()
         requested = str(payload.get("qualityMode", "free")).lower()
         return (
-            mode == "automatic" and requested in {"balanced", "precise"}
+            mode == "automatic" and requested in {"free", "balanced", "precise"}
         ) or (mode == "manual" and requested == "precise")
 
     @staticmethod

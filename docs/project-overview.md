@@ -2,7 +2,7 @@
 
 苏打阅读是面向中文读者的英语沉浸阅读工具。它把许可原文做成可点读、可听读、可划线、可回原文复习的编辑式阅读器，而不是带打卡、经验值和功能卡片的学习 App。
 
-当前主线是 **Vite + React 网页原型**，配本地 FastAPI 翻译与内容接口。仓库里同时保留 Android（Expo）和 Supabase 内部云方案，供后续小范围部署，不是读者日常打开网页时的必经路径。
+当前就是 **Vite + React 网页**，配本地 FastAPI 翻译与内容接口。阅读进度、生词、划线和偏好存在浏览器里。
 
 ## 它解决什么问题
 
@@ -18,7 +18,7 @@
 ## 给谁用
 
 - **读者**：按 CEFR（A2 / B1 / B2 / C1）读当日文章、书架馆藏和自己导入的书，查词、听读、划线、复习生词。
-- **管理员**：在独立管理站配置内容来源、内部账号和翻译模型路由。阅读端看不到这些。
+- **管理员**：在独立管理站配置内容来源和翻译模型路由。阅读端看不到这些内容运维面板。
 
 产品气质是编辑部出品的读本，不是课程平台。视觉以 `reference-reader.png` 为阅读页基准：日间暖象牙纸 + 炭黑字 + 薄荷点缀；夜间深墨蓝 + 暖灰字 + 克制青色。
 
@@ -31,9 +31,9 @@
 | **书架** | 编辑部目录 + 本地导入（EPUB / TXT / 文本型 PDF）。剩余时间按未读词数估算，听读位置也会计入。 |
 | **生词** | 列表与 FSRS 复习。每日上限默认可调。复习亮出词义后也可回「原文」。 |
 | **我的** | 水平、主题、纸色、字体、字号、行距、栏宽。偏好存在本地。 |
-| **管理站** `/admin` | 采集（抓取许可原文）、验证（自动检查版权/语言/篇幅/新鲜度，展示通过/抓取）、模型路由、内部账号。没有闲置的人工复核队列。 |
+| **管理站** `/admin` | 采集（抓取许可原文）、验证（自动检查版权/语言/篇幅/新鲜度，展示通过/抓取）和模型路由。没有内部账号管理或闲置的人工复核队列。 |
 
-导入文件只留在浏览器或 Android 沙盒，不上传到服务器。TXT 支持 UTF-8，以及 Windows 记事本常见的 UTF-16。EPUB 会按段落和表格还原正文，并跳过不进入正文的目录页；文本型 PDF 会按行距重新分段。扫描件不做文字识别。
+导入文件只留在浏览器里。TXT 支持 UTF-8，以及 Windows 记事本常见的 UTF-16。EPUB 会按段落和表格还原正文，并跳过不进入正文的目录页；文本型 PDF 会按行距重新分段。扫描件不做文字识别。
 
 ## 阅读器怎么用
 
@@ -64,15 +64,15 @@
 - 持久划线（连续词合并成一条底色，而不是每个词一个色块）
 - 文内查找，单词或连续词组都算一处，显示第几处 / 共几处，无结果时标明
 - 复制原句：先走同步 `execCommand`，避免手势丢失；失败显示「未复制」
-- 本地翻译记忆：合并进行中的同一请求，命中则不再打云端
+- 本地翻译记忆：合并进行中的同一请求，命中则不再请求翻译接口
 
 ## 翻译与内容
 
-词译默认走 **DeepSeek**。管理员可在模型路由里加更便宜的 OpenAI 兼容端点；密钥放在 `backend/data/provider_overrides.json`，不要写进前端环境变量。
+词译默认路由是 **DeepSeek**，但它可能计费。DeepSeek、cheapApi 和自定义线路默认都被零预算护栏阻断；只有显式启用付费、设置正数预算并满足请求模式后才可能调用。管理员可在模型路由里加 OpenAI 兼容端点；密钥放在 `backend/data/provider_overrides.json`，不要写进前端环境变量。详见 `docs/translation-provider-setup.md`。
 
-查找顺序大致是：同一句里已收藏的释义 → 浏览器翻译记忆 → 进行中的同一请求 → 云端。换一句不会沿用上一句的收藏义。缓存键包含词、所在句和内容哈希。离线词典义只供这一次显示，不写入会挡住后来语境翻译的长期缓存。
+查找顺序大致是：同一句里已收藏的释义 → 浏览器翻译记忆 → 进行中的同一请求 → 本机翻译接口。换一句不会沿用上一句的收藏义。缓存键包含词、所在句和内容哈希。离线词典义只供这一次显示，不写入会挡住后来语境翻译的长期缓存。
 
-生词按「文章 + 词 + 原句」区分。云端若还没加上 `sentence_key`、`common_translation`、`referent` 这几列，客户端会退回旧的保存方式，本机已有的常见义和文中指代不会被空记录盖掉。这些列在 `supabase/migrations/202610150001_article_intro_zh.sql`、`202610150002_vocabulary_sentence_key.sql`、`202610150003_vocabulary_gloss.sql`，需要对本项目执行 `npx supabase db push` 之后才会进线上库。
+生词按「文章 + 词 + 原句」区分，存在本机浏览器里。
 
 内容侧：
 
@@ -92,20 +92,14 @@
   ├─ lib/api.js                 翻译记忆、请求合并、Feed / 登录
   └─ lib/reader.js              再导出 packages/core 的分词与句切分
 
-共享包
-  ├─ packages/core              分词、句切分、朗读进度、FSRS
-  └─ packages/api-client        Web / Android 共用的云客户端
+packages/core                   分词、句切分、朗读进度、FSRS
 
 本地 API（backend/）
-  ├─ FastAPI 翻译网关           DeepSeek 等，可对冲超时
-  └─ 内容服务                   采集、校验、导读、Feed
-
-可选云端
-  ├─ supabase/                  Auth、RLS、Edge Functions、共享缓存
-  └─ apps/mobile/               Expo Android，本地 PDF 抽取
+  ├─ FastAPI 翻译网关           DeepSeek 等，进程内缓存
+  └─ 内容服务                   采集、校验、导读、Feed，SQLite
 ```
 
-网页未接云端时使用内置演示文与本地 `localStorage`（进度、生词、划线、阅读偏好、翻译记忆）。生产小范围部署时，进度和生词可走 Supabase；**不需要**为日常开发常驻 Redis / Celery。`backend/` 的 FastAPI 是本地开发兼容层。
+后端没开时，只有开发服务器能使用内置文章和已配置的开发登录回退；生产构建的登录与在线今日源仍需要 FastAPI。进度、生词、划线、阅读偏好和翻译记忆始终使用浏览器本地存储。
 
 ## 目录
 
@@ -115,30 +109,30 @@
 | `src/screens/ReaderScreen.jsx` | 阅读页（从 App 拆出） |
 | `packages/core/` | 文本切分与复习算法 |
 | `backend/` | 本地翻译与内容管道 |
-| `apps/mobile/` | Android |
-| `supabase/` | 云数据库与 Edge Functions |
-| `docs/` | 部署、翻译密钥、本说明 |
+| `docs/` | 翻译密钥、内容管道、本说明 |
 | `AGENTS.md` | 给后续开发者的产品硬规则 |
 | `reference-reader.png` | 阅读页视觉基准 |
 
 ## 本地运行
 
-网页（演示数据即可阅读）：
+在仓库根目录安装依赖并启动网页：
 
 ```powershell
-npm install
+npm ci
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 npm run dev -- --host 127.0.0.1 --port 4173 --strictPort
 ```
 
-需要云端词译时另开 FastAPI（默认 `http://127.0.0.1:8000`），在 `backend/.env` 配置 `DEEPSEEK_API_KEY` 等。前端 `VITE_API_BASE` 指向该地址。
+需要登录、在线今日源、词译或采集时另开 FastAPI（默认 `http://127.0.0.1:8000`）。先复制两个环境示例并填写本地口令；前端 `VITE_API_BASE` 指向该地址。DeepSeek 的付费启用条件见 `docs/translation-provider-setup.md`。
 
 ```powershell
-npm test
+cd backend
+$env:PYTHONPATH="."
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-接 Supabase、做管理员引导、打 Android 包的步骤见仓库根目录 [README.md](../README.md) 和 `docs/internal-cloud-deployment.md`、`docs/android-internal-release.md`、`docs/translation-provider-setup.md`。
-
-**密钥**：service role、数据库密码、模型 Key、GitHub Token 不得放入 `VITE_*` 或 `EXPO_PUBLIC_*`。
+模型密钥只放在 `backend/.env` 或管理端本机覆盖文件，不要写进前端环境变量或源码。
 
 ## 产品硬规则（摘要）
 

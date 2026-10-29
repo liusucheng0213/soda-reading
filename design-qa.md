@@ -1,56 +1,33 @@
-# 苏打阅读响应式网页设计 QA
+# 苏打阅读响应式网页设计 QA（历史记录）
 
-## Evidence
+> 本文保留一次历史设计复核的过程和结论，不是当前发布验证。当时使用的 QA 截图没有纳入公开仓库，因此移除不可访问的文件名链接。当前测试结果以最新 CI 或本地验证为准。
 
-- Source visual truth: `reference-reader.png`
-- Mobile implementation: `qa-mobile-reader-day-new.png`, `qa-mobile-reader-night-new.png`
-- Desktop implementation: `qa-web-home-1440.png`, `qa-web-reader-final-1440.png`
-- Tablet implementation: `qa-web-home-1024-clip.png`
-- Full-view normalized comparison: `qa-mobile-comparison-new.png`
-- Focused word comparison: `qa-word-focus-responsive.png`
-- Source pixels: `853×1844`; normalized to `390×844`
-- Mobile implementation pixels/CSS viewport: `390×844`, DPR 1
-- Desktop CSS viewport: `1440×900`; captured content `1439×855` because the in-app browser reserves its own chrome
-- Desktop measured tracks: `224px / 916px / 300px`; text column `760px`
-- State: day and night reader; selected word `seeking`; expanded sentence translation; provider-unavailable retry state
+## 当时的设计依据与状态
 
-## Findings
+- 视觉基准：`reference-reader.png`，源图像为 `853×1844`，当时归一化到 `390×844`。
+- 检查视口：手机 `390×844`、平板 `1024×768`、桌面 `1440×900`。
+- 当时桌面测得三栏轨道为 `224px / 916px / 300px`，正文列为 `760px`。
+- 检查状态包括日间/夜间阅读器、选中单词 `seeking`、展开整句翻译和翻译不可用重试状态。
 
-No actionable P0/P1/P2 visual or interaction findings remain.
+## 当时的结论
 
-- Fonts and typography: Newsreader remains the reading face and Inter the interface face. Mobile preserves the source hierarchy; desktop increases body text to `22px / 37.4px` within a measured `760px` column.
-- Spacing and layout rhythm: mobile retains the source’s compact header and editorial paragraph rhythm. Desktop uses the approved three-column layout without horizontal overflow; tablet collapses the right panel and narrows navigation.
-- Colors and visual tokens: day mode retains warm ivory, charcoal, and muted mint. Night mode retains deep ink navy, warm gray, and restrained cyan with readable contrast.
-- Image quality and assets: the reference contains no content imagery that needs recreation. Phosphor icons remain crisp UI assets; no placeholder illustrations or improvised SVG assets were added.
-- Copy and content: product copy stays concise and reading-focused. The unverified Hangzhou quotation in the source mock remains intentionally excluded, matching the prior content-safety decision.
-- Word and sentence interaction: word meaning stays directly beneath the selected word; sentence translation stays directly beneath its sentence. Desktop adds details in the right panel without replacing either inline interaction.
+当时没有遗留可执行的 P0/P1/P2 视觉或交互发现。
 
-## Comparison History
+- 字体：Newsreader 用于正文，Inter 用于界面；手机保留基准层级，桌面正文为当时测得的 `22px / 37.4px`。
+- 布局：桌面使用三栏且无横向溢出；平板收起右栏并收窄导航。
+- 色彩：日间使用暖象牙、炭黑和薄荷色；夜间使用深墨蓝、暖灰和克制青色。
+- 交互：词义位于单词下方，整句译文位于原句下方；桌面学习栏是补充而不是替代。
+- 文案：源 mock 中未核实的杭州引文继续排除。
 
-1. Initial P1: desktop browsers were constrained to the `390px` phone frame.
-   - Fix: replaced the fixed frame with responsive app and reader grids.
-   - Evidence: `qa-web-home-1440.png`, `qa-web-reader-final-1440.png`; measured body scroll width equals the `1440px` viewport.
-2. Initial P1: an unknown word could display “语境释义” as if translation succeeded.
-   - Fix: introduced loading, contextual, basic, and retryable-error states; removed placeholder success.
-   - Evidence: browser flow showed one visible “重试翻译” action for an unknown word and no console errors.
-3. Initial P2: a slower previous request could overwrite a newly selected word.
-   - Fix: added per-request cancellation and stale-response guards for word and sentence translation.
-   - Evidence: repeated selection and toggle flows completed without stale UI or browser errors.
-4. Post-fix comparison:
-   - Word translation “寻求” appeared both beneath `seeking` and in the desktop study panel.
-   - Clicking `seeking` again reduced exact “寻求” matches from two to zero; selecting it again restored both.
-   - Sentence translation “独立书店不只是买书的地方。” appeared exactly once beneath its source sentence.
+## 当时的修复记录
 
-## Browser Verification
+1. 桌面浏览器曾被限制在手机宽度中，后改为响应式应用与阅读器网格。
+2. 未知单词曾可能显示“语境释义”占位成功，后改为加载、语境、基础翻译和可重试错误状态。
+3. 较慢的旧请求曾可能覆盖新选词，后加入请求取消和陈旧响应防护。
+4. 当时复核了点词收起/重选、整句译文展开、日夜切换和返回首页。
 
-- Primary interactions tested: open daily article, select/hide/reselect word, expand sentence translation, show unknown-word retry, switch day/night mode, return to home.
-- Responsive states checked: `390×844`, `1024×768`, `1440×900`.
-- Desktop computed geometry: left navigation `224px`, center `916px`, right study panel `300px`, reading column `760px`.
-- Browser console warnings/errors: none.
-- Automated verification: frontend build passed, 5 frontend tests passed, 7 backend tests passed.
+## 验证边界
 
-## Follow-up Polish
+当时的浏览器记录称控制台没有警告或错误，前端构建及当时的前后端测试通过。那些测试数量已过时，不代表当前套件或本轮结果。
 
-- P3: real provider responses may produce longer Chinese glosses than the local corpus; review interlinear wrapping after production keys are configured.
-
-final result: passed
+后续仍应在真实提供方返回较长中文释义时检查行间换行，并补充读屏、大字体和更多真实设备验证。

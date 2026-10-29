@@ -242,6 +242,17 @@ def test_filter_deduplicates_and_never_escalates_full_text_permission(pipeline):
     assert stored[0]["fullTextAllowed"] is False
 
 
+def test_content_levels_ignore_legacy_server_profiles(pipeline):
+    from sqlalchemy import text
+
+    with pipeline.database.engine.begin() as connection:
+        connection.execute(text("create table profiles (cefr text, is_active boolean)"))
+        connection.execute(text("insert into profiles values ('C1', true)"))
+    pipeline.settings.content_active_cefr_levels = "A2,B1,C1"
+
+    assert pipeline.active_cefr_levels() == ["A2", "B1", "C1"]
+
+
 def test_zero_budget_excludes_routes_that_can_auto_charge():
     gateway = TranslationGateway(
         Settings(
@@ -257,13 +268,198 @@ def test_zero_budget_excludes_routes_that_can_auto_charge():
         )
     )
 
-    assert [provider.name for provider in gateway.providers] == ["zhipu", "deepseek"]
+    assert [provider.name for provider in gateway.providers] == ["zhipu"]
     status = {item["provider"]: item for item in gateway.provider_status()}
     assert status["siliconflow"]["status"] == "blocked_by_zero_budget"
     assert status["tencent"]["status"] == "blocked_by_zero_budget"
     assert status["dashscope"]["status"] == "blocked_by_zero_budget"
-    assert status["deepseek"]["status"] == "ready"
+    assert status["deepseek"]["status"] == "blocked_by_zero_budget"
     assert status["deepseek"]["billingClass"] == "cheap_api"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paid_provider_enabled", [False, True])
+async def test_zero_budget_never_invokes_deepseek(paid_provider_enabled):
+    gateway = TranslationGateway(
+        Settings(
+            paid_provider_enabled=paid_provider_enabled,
+            daily_paid_budget_cny=0,
+            deepseek_api_key="configured-deepseek",
+            translation_provider_order="deepseek",
+        )
+    )
+    calls = []
+
+    async def forbidden_call(provider, *_args):
+        calls.append(provider.name)
+        return {"translation": "禁止调用"}
+
+    gateway._call_provider = forbidden_call
+    with pytest.raises(RuntimeError):
+        await gateway.translate(
+            "word",
+            {"word": "unlistedword", "sentence": "This route must stay offline."},
+        )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_zero_budget_never_invokes_custom_cheap_api(monkeypatch):
+    monkeypatch.setattr("app.translation.load_overrides", lambda: {
+        "order": ["custom-paid"],
+        "providers": {
+            "custom-paid": {
+                "kind": "openai",
+                "baseUrl": "https://provider.invalid/v1",
+                "model": "paid-model",
+                "apiKey": "configured-custom-key",
+                "cheapApi": True,
+            },
+        },
+    })
+    gateway = TranslationGateway(
+        Settings(paid_provider_enabled=True, daily_paid_budget_cny=0)
+    )
+    calls = []
+
+    async def forbidden_call(provider, *_args):
+        calls.append(provider.name)
+        return {"translation": "禁止调用"}
+
+    gateway._call_provider = forbidden_call
+    with pytest.raises(RuntimeError):
+        await gateway.translate(
+            "word",
+            {"word": "unlistedword", "sentence": "This custom route must stay offline."},
+        )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_cheap_paid_route_still_consumes_daily_budget():
+    gateway = TranslationGateway(
+        Settings(
+            paid_provider_enabled=True,
+            daily_paid_budget_cny=1,
+            paid_fallback_mode="automatic",
+            deepseek_api_key="configured-deepseek",
+            translation_provider_order="deepseek",
+        )
+    )
+    calls = []
+
+    async def fake_call(provider, *_args):
+        calls.append(provider.name)
+        return {"translation": "河岸", "lemma": "bank"}
+
+    gateway._call_provider = fake_call
+    await gateway.translate(
+        "word",
+        {"word": "bank", "sentence": "We sat on the river bank.", "qualityMode": "precise"},
+    )
+    gateway.settings.daily_paid_budget_cny = gateway.overview()["costGuard"]["reservedTodayCny"]
+    with pytest.raises(RuntimeError):
+        await gateway.translate(
+            "word",
+            {"word": "bank", "sentence": "The river bank is quiet today.", "qualityMode": "precise"},
+        )
+    assert calls == ["deepseek"]
+
+
+@pytest.mark.asyncio
+async def test_automatic_mode_allows_budgeted_deepseek_for_default_reader_requests():
+    gateway = TranslationGateway(
+        Settings(
+            paid_provider_enabled=True,
+            daily_paid_budget_cny=1,
+            paid_fallback_mode="automatic",
+            deepseek_api_key="configured-deepseek",
+            translation_provider_order="deepseek",
+        )
+    )
+
+    async def fake_call(*_args):
+        return {"translation": "河岸", "lemma": "bank"}
+
+    gateway._call_provider = fake_call
+    result = await gateway.translate(
+        "word",
+        {"word": "bank", "sentence": "We sat on the river bank.", "qualityMode": "free"},
+    )
+    assert result["provider"] == "deepseek"
+
+
+@pytest.mark.asyncio
+async def test_zero_budget_editorial_never_invokes_deepseek():
+    gateway = EditorialGateway(
+        Settings(
+            paid_provider_enabled=True,
+            daily_paid_budget_cny=0,
+            deepseek_api_key="configured-deepseek",
+            editorial_provider_order="deepseek",
+        )
+    )
+    calls = []
+
+    async def forbidden_call(provider, *_args):
+        calls.append(provider.name)
+        return {}
+
+    gateway._call = forbidden_call
+    with pytest.raises(RuntimeError):
+        await gateway.generate("科技", "B1", [])
+    assert calls == []
+    assert gateway.providers == []
+
+
+@pytest.mark.asyncio
+async def test_editorial_paid_route_stops_when_daily_budget_is_exhausted(monkeypatch):
+    gateway = EditorialGateway(
+        Settings(
+            paid_provider_enabled=True,
+            daily_paid_budget_cny=1,
+            paid_request_max_cny=1,
+            deepseek_api_key="configured-deepseek",
+            editorial_provider_order="deepseek",
+        )
+    )
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            calls.append(url)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={"choices": [{"message": {"content": '{"introZh":"这篇英文文章介绍城市阅读空间如何帮助读者理解社区。"}'}}]},
+            )
+
+    monkeypatch.setattr("app.content_editorial.httpx.AsyncClient", FakeClient)
+    first = await gateway.intro_zh(
+        title="Reading in the City",
+        source="Example",
+        topic="文化",
+        paragraphs=["Libraries create space for reading and conversation."],
+    )
+    assert "阅读空间" in first
+    gateway.settings.daily_paid_budget_cny = sum(gateway._paid_reserved_cny.values())
+    second = await gateway.intro_zh(
+        title="Another City",
+        source="Example",
+        topic="文化",
+        paragraphs=["Parks create space for reading and conversation."],
+    )
+    assert second.startswith("一篇来自Example")
+    assert calls == ["/chat/completions"]
 
 
 @pytest.mark.asyncio
