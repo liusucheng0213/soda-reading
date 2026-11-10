@@ -156,13 +156,81 @@ export const libraryQuietArticle = {
   },
 };
 
+export const morningHabitArticle = {
+  id: "morning-habit-a1-20260717",
+  title: "A Small Morning Habit",
+  author: "苏打阅读编辑部",
+  source: "苏打阅读编写",
+  sourceMode: "editorial_digest",
+  publishedAt: "2026-07-17T08:00:00+08:00",
+  cefr: "A1",
+  readingMinutes: 2,
+  topic: "文化",
+  qualityScore: 85,
+  summary: "一个每天十分钟的阅读习惯，如何慢慢带来进步。",
+  introZh: "一个每天十分钟的阅读习惯，如何慢慢带来进步。",
+  paragraphs: [
+    "Mia likes books. She reads for ten minutes every morning. She sits near the window with a cup of tea.",
+    "Some days, she reads only one page. She does not worry about the number of pages. She wants to enjoy the story.",
+    "Reading is now part of her day. It helps her learn new words. She feels happy when she understands a little more.",
+  ],
+  sentenceTranslations: {
+    "Mia likes books.": "米娅喜欢书。",
+    "She reads for ten minutes every morning.": "她每天早上读十分钟。",
+    "She sits near the window with a cup of tea.": "她端着一杯茶，坐在窗边。",
+    "Some days, she reads only one page.": "有些日子，她只读一页。",
+    "She does not worry about the number of pages.": "她不在意读了多少页。",
+    "She wants to enjoy the story.": "她想享受故事。",
+    "Reading is now part of her day.": "阅读现在成了她日常生活的一部分。",
+    "It helps her learn new words.": "这帮助她学习新单词。",
+    "She feels happy when she understands a little more.": "每当多理解一点，她都会感到开心。",
+  },
+};
+
+export const measurementMeaningArticle = {
+  id: "measurement-meaning-c2-20260716",
+  title: "When Measurement Replaces Meaning",
+  author: "苏打阅读编辑部",
+  source: "苏打阅读编写",
+  sourceMode: "editorial_digest",
+  publishedAt: "2026-07-16T08:00:00+08:00",
+  cefr: "C2",
+  readingMinutes: 4,
+  topic: "文化",
+  qualityScore: 90,
+  summary: "指标何时能帮助判断，何时又会悄悄替代真正重要的目标。",
+  introZh: "指标何时能帮助判断，何时又会悄悄替代真正重要的目标。",
+  paragraphs: [
+    "A measure is most useful when it remains visibly subordinate to the purpose it serves. Yet institutional life often reverses that relationship: what can be counted acquires an air of legitimacy, while what resists quantification is treated as an inconvenient remainder. The distinction matters because a precise proxy is still a proxy, and its precision can obscure the very gap between the available evidence and the original intention.",
+    "Consider a library that judges its value chiefly by daily footfall. The figure is intelligible, comparable, and reassuringly objective, but it says little about whether a hesitant reader found the right book or whether a quiet table made sustained attention possible. Once managers begin to optimize the number, they may favor crowded events over the less visible encounters through which a public institution actually justifies itself.",
+    "None of this makes measurement inherently suspect. Without evidence, institutions can mistake their own intentions for their effects, and well-chosen indicators expose failures that goodwill alone would conceal. The difficulty arises when an indicator ceases to be a provisional instrument and becomes an unquestioned destination, so that improving it is mistaken for serving the people whose welfare it was designed to represent.",
+    "A more defensible practice is to treat every metric as an argument rather than a verdict. We should be able to explain what it captures, what it systematically leaves out, and whose experience might contradict it. That discipline preserves the usefulness of numbers without granting them authority over purposes they cannot themselves articulate.",
+  ],
+  sentenceTranslations: {
+    "A measure is most useful when it remains visibly subordinate to the purpose it serves.": "当一种衡量方式始终明确服从于它服务的目标时，它才最有用。",
+    "Yet institutional life often reverses that relationship: what can be counted acquires an air of legitimacy, while what resists quantification is treated as an inconvenient remainder.": "然而，机构运作常常颠倒这种关系：可计数之事仿佛天然正当，难以量化之事则被视作麻烦的剩余。",
+    "The distinction matters because a precise proxy is still a proxy, and its precision can obscure the very gap between the available evidence and the original intention.": "这种区别很重要，因为再精确的替代指标仍只是替代指标，而它的精确性恰恰可能掩盖现有证据与最初目标之间的鸿沟。",
+    "Consider a library that judges its value chiefly by daily footfall.": "设想一家图书馆主要依据每日到馆人数来判断自身价值。",
+    "The figure is intelligible, comparable, and reassuringly objective, but it says little about whether a hesitant reader found the right book or whether a quiet table made sustained attention possible.": "这个数字容易理解、便于比较，还给人一种令人安心的客观感，却几乎无法说明：一位迟疑的读者是否找到了合适的书，一张安静的书桌是否让持续的专注成为可能。",
+    "Once managers begin to optimize the number, they may favor crowded events over the less visible encounters through which a public institution actually justifies itself.": "一旦管理者开始优化这个数字，他们可能偏爱人头攒动的活动，而忽视那些不那么显眼、却真正体现公共机构存在价值的相遇。",
+    "None of this makes measurement inherently suspect.": "这一切并不意味着衡量本身值得怀疑。",
+    "Without evidence, institutions can mistake their own intentions for their effects, and well-chosen indicators expose failures that goodwill alone would conceal.": "没有证据，机构可能把自己的意图误当成实际效果；选择得当的指标则能揭露仅凭善意会被掩盖的失败。",
+    "The difficulty arises when an indicator ceases to be a provisional instrument and becomes an unquestioned destination, so that improving it is mistaken for serving the people whose welfare it was designed to represent.": "真正的困难出现在指标不再只是暂时的工具，而成为不容质疑的终点，于是改善指标被误认为是在服务那些它原本旨在代表其福祉的人。",
+    "A more defensible practice is to treat every metric as an argument rather than a verdict.": "更稳妥的做法，是把每项指标都视为一种论证，而不是最终裁决。",
+    "We should be able to explain what it captures, what it systematically leaves out, and whose experience might contradict it.": "我们应当能够说明它捕捉到了什么、系统性地遗漏了什么，以及谁的经验可能对它构成反驳。",
+    "That discipline preserves the usefulness of numbers without granting them authority over purposes they cannot themselves articulate.": "这种自律既保留了数字的用途，又不把支配目标的权威交给数字，因为数字自身并不能阐明这些目标。",
+  },
+};
+
 export const dailyAlternatives = [urbanTreesArticle, oceanHeatArticle];
 
 export const fallbackLibrary = [
+  morningHabitArticle,
   urbanTreesArticle,
   demoArticle,
   oceanHeatArticle,
   libraryQuietArticle,
+  measurementMeaningArticle,
 ];
 
 export function articleForLevel(live = [], library = fallbackLibrary, level = "B1") {

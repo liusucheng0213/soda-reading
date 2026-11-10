@@ -769,3 +769,90 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.data-management { margin-top: 28px; padding-top: 4px; border-top: 1px solid var(--hairline); }
+.data-summary { color: var(--text); font-size: 14px; }
+.data-help { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.data-actions, .data-clear-actions, .data-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.data-actions button, .data-clear-actions button, .data-confirm-actions button, .data-document-list button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-strong); color: var(--text); }
+.data-clear-actions button, .data-document-list button { color: var(--text-muted); font-size: 12px; }
+.data-document-list { display: grid; gap: 0; margin: 16px 0; padding: 0; list-style: none; }
+.data-document-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+.data-document-list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.data-confirm { width: min(420px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--surface); color: var(--text); }
+.data-confirm::backdrop { background: rgb(0 0 0 / 35%); }
+.data-confirm p { color: var(--text-muted); line-height: 1.7; }
+.data-confirm-actions { justify-content: flex-end; }
+.data-confirm-actions form { margin: 0; }
+.danger-button { color: #a34242 !important; }
+
+.chapter-menu-button { min-height: 28px; margin-left: 10px; padding: 2px 8px; border: 1px solid var(--reader-rule); border-radius: 5px; background: transparent; color: var(--reader-muted); font: 11px "Inter", sans-serif; vertical-align: middle; }
+.chapter-navigation { min-height: 0; }
+.chapter-navigation ol { margin: 0; padding: 0; list-style: none; }
+.chapter-navigation li { margin: 0; }
+.chapter-navigation button { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 7px; width: 100%; min-height: 40px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--reader-rule); background: transparent; color: var(--reader-muted); text-align: left; }
+.chapter-navigation button > span { padding-top: 2px; font-size: 9px; }
+.chapter-navigation button strong { overflow: hidden; color: var(--reader-ink); font-size: 11px; font-weight: 400; line-height: 1.45; text-overflow: ellipsis; }
+.chapter-navigation button small { grid-column: 2; color: var(--mint); font-size: 9px; }
+.chapter-navigation button.active { color: var(--mint); }
+.chapter-navigation button.active strong { color: var(--mint); font-weight: 600; }
+.chapter-dialog { width: min(480px, calc(100vw - 28px)); max-height: 82vh; padding: 20px; border: 1px solid var(--reader-rule); border-radius: 10px; background: var(--reader-paper); color: var(--reader-ink); }
+.chapter-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.chapter-dialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.chapter-dialog-head h2 { font-size: 18px; }
+.chapter-dialog-head form { margin: 0; }
+.chapter-dialog-head button { min-width: 36px; min-height: 36px; border: 0; background: transparent; color: var(--reader-muted); }
+.chapter-dialog .chapter-navigation { max-height: 65vh; overflow-y: auto; }
+.chapter-pager { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 38px; padding-top: 18px; border-top: 1px solid var(--reader-rule); }
+.chapter-pager button { min-height: 40px; padding: 8px 14px; border: 1px solid var(--reader-rule); border-radius: 6px; background: transparent; color: var(--reader-ink); }
+.chapter-pager span { color: var(--reader-muted); font-size: 11px; }
+@media (min-width: 1200px) {
+  .reader-desktop-nav { max-height: 100vh; overflow: hidden; }
+  .reader-desktop-nav .chapter-navigation { flex: 1; min-height: 0; margin-top: 18px; overflow-y: auto; }
+  .reader-desktop-nav .chapter-navigation button strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .reader-chapter, .reader-side-progress { flex-shrink: 0; }
+  .chapter-menu-button { display: none; }
+}
+
+.placement-screen { max-width: 680px; }
+.placement-progress { display: flex; align-items: center; gap: 12px; margin: 24px 0; color: var(--text-muted); font-size: 12px; }
+.placement-progress progress { flex: 1; height: 6px; accent-color: var(--mint); }
+.placement-kind { color: var(--mint-deep); font-size: 12px; font-weight: 600; }
+.placement-context { margin: 20px 0; color: var(--text); font: 400 24px/1.55 "Newsreader", Georgia, serif; }
+.placement-screen h2 { margin-bottom: 18px; font-size: 18px; }
+.placement-choices { display: grid; gap: 10px; margin-bottom: 20px; }
+.placement-choices button { min-height: 50px; padding: 12px 16px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface-strong); color: var(--text); text-align: left; line-height: 1.5; }
+.placement-choices button.selected { border-color: var(--mint); color: var(--mint-deep); }
+.placement-explanation { margin: 16px 0; padding: 14px 16px; border-left: 2px solid var(--mint); background: color-mix(in srgb, var(--surface-strong) 70%, transparent); }
+.placement-explanation p { margin: 6px 0 0; color: var(--text-muted); line-height: 1.7; }
+.placement-explanation.incorrect { border-left-color: #b45858; }
+.placement-secondary { display: flex; justify-content: space-between; margin-top: 14px; }
+.placement-result { display: flex; align-items: baseline; gap: 16px; margin: 26px 0 12px; }
+.placement-result strong { color: var(--mint-deep); font: 500 64px/1 "Newsreader", serif; }
+.placement-result span { color: var(--text-muted); }
+.placement-breakdown { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 22px 0; padding: 0; list-style: none; }
+.placement-breakdown li { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--hairline); }
+.placement-breakdown li span { color: var(--text-muted); font-size: 11px; }
+.placement-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.placement-settings small { color: var(--text-muted); }
+@media (max-width: 720px) {
+  .placement-context { font-size: 21px; }
+  .placement-breakdown { grid-template-columns: repeat(2, 1fr); }
+}
+
+.review-progress { width: 100%; height: 5px; margin-bottom: 18px; accent-color: var(--mint); }
+.review-phonetic { display: block; margin-top: 8px; color: var(--text-muted); font-size: 12px; }
+.review-card .primary-button small { margin-left: 6px; opacity: .65; }
+.review-ratings button small { margin-left: 5px; opacity: .6; }
+.review-answer > span { display: block; margin-top: 6px; color: var(--text-muted); font-size: 12px; }
+.review-session-tools { display: flex; justify-content: flex-end; margin-top: 12px; }
+.review-session-tools small { margin-left: 4px; color: var(--text-muted); }
+.review-today-link { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 44px; margin: 0 0 18px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--hairline); background: transparent; color: var(--text-muted); font-size: 12px; }
+.review-today-link span { color: var(--mint-deep); }
+.reading-completion { margin-top: 46px; padding: 26px 0 8px; border-top: 1px solid var(--reader-rule); }
+.reading-completion h2 { margin: 10px 0; color: var(--reader-ink); font: 500 22px/1.4 "Newsreader", serif; }
+.reading-completion > p { color: var(--reader-muted); font: 12px/1.7 "Inter", sans-serif; }
+.completion-actions, .completion-feedback { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.completion-actions button, .completion-feedback button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--reader-rule); border-radius: 6px; background: transparent; color: var(--reader-ink); }
+.completion-feedback button[aria-pressed="true"] { border-color: var(--mint); color: var(--mint); }
+.completion-suggestion .text-button { margin-left: 8px; color: var(--mint); }

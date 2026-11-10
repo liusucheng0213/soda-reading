@@ -4,16 +4,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-class SmsSendRequest(BaseModel):
-    phone: str = Field(pattern=r"^1\d{10}$")
-
-
-class SmsVerifyRequest(SmsSendRequest):
-    code: str = Field(min_length=6, max_length=6)
-
-
 class Preferences(BaseModel):
-    level: Literal["A2", "B1", "B2", "C1"] = "B1"
+    level: Literal["A1", "A2", "B1", "B2", "C1", "C2"] = "B1"
     topics: list[str] = Field(default_factory=lambda: ["科技", "文化"], min_length=1, max_length=4)
     minutes: Literal[5, 10, 20] = 10
     reminder: str = "20:30"
@@ -23,11 +15,6 @@ class Preferences(BaseModel):
     def valid_time(cls, value: str) -> str:
         datetime.strptime(value, "%H:%M")
         return value
-
-
-class PasswordLoginRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=24)
-    password: str = Field(min_length=8, max_length=128)
 
 
 class TranslationRequest(BaseModel):

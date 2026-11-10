@@ -29,7 +29,8 @@ const checks = target === "admin"
       [!bundle.includes("再读本句"), "admin bundle excludes reader controls"],
     ]
   : [
-      [bundle.includes("登录并开始阅读"), "web bundle contains reader login"],
+      [!bundle.includes("登录并开始阅读"), "web bundle excludes reader login"],
+      [bundle.includes("无需账号"), "web bundle contains local-only guidance"],
       [!bundle.includes("local-admin-session"), "production web excludes the development offline session"],
       [!bundle.includes("local-demo"), "production web excludes the development SMS fallback"],
     ];

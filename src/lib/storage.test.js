@@ -38,3 +38,38 @@ describe("account storage", () => {
     vi.unstubAllGlobals();
   });
 });
+
+
+describe("local document management", () => {
+  it("deletes only the requested document", async () => {
+    const deleted = [];
+    vi.stubGlobal("indexedDB", {
+      open: () => {
+        const request = {};
+        queueMicrotask(() => {
+          request.result = {
+            objectStoreNames: { contains: () => true },
+            transaction: () => {
+              const transaction = {};
+              transaction.objectStore = () => ({
+                delete: (id) => {
+                  deleted.push(id);
+                  queueMicrotask(() => transaction.oncomplete());
+                  return {};
+                },
+              });
+              return transaction;
+            },
+            close: vi.fn(),
+          };
+          request.onsuccess();
+        });
+        return request;
+      },
+    });
+    const { deleteLocalDocument } = await import("./storage.js");
+    await deleteLocalDocument("book-1");
+    expect(deleted).toEqual(["book-1"]);
+    vi.unstubAllGlobals();
+  });
+});

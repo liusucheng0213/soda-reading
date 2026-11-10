@@ -27,3 +27,15 @@ describe("bundled reading texts", () => {
     expect(articleForLevel([{ id: "empty", cefr: "A2", paragraphs: [] }], [], "A2").article.id).toBe("empty");
   });
 });
+
+
+describe("full local level range", () => {
+  it("has readable A1 and C2 articles with bodies", () => {
+    const a1 = articleForLevel([], fallbackLibrary, "A1");
+    const c2 = articleForLevel([], fallbackLibrary, "C2");
+    expect(a1.article.cefr).toBe("A1");
+    expect(a1.article.paragraphs.length).toBeGreaterThan(1);
+    expect(c2.article.cefr).toBe("C2");
+    expect(c2.article.paragraphs.length).toBeGreaterThan(1);
+  });
+});

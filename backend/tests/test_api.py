@@ -16,7 +16,6 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def isolate_tests_from_real_cloud_credentials(monkeypatch):
     """Unit tests must be deterministic and must never consume a user's API quota."""
-    monkeypatch.setattr(main_module.settings, "dev_sms_code", "000000")
     offline_gateway = TranslationGateway(
         Settings(
             modelscope_access_token="",
@@ -32,21 +31,9 @@ def isolate_tests_from_real_cloud_credentials(monkeypatch):
     monkeypatch.setattr(main_module, "gateway", offline_gateway)
 
 
-def login() -> str:
-    phone = "13800138000"
-    sent = client.post("/auth/sms/send", json={"phone": phone})
-    assert sent.status_code == 200
-    verified = client.post("/auth/sms/verify", json={"phone": phone, "code": sent.json()["devCode"]})
-    assert verified.status_code == 200
-    return verified.json()["accessToken"]
-
-
-def test_login_feed_and_preferences():
-    token = login()
-    headers = {"Authorization": f"Bearer {token}"}
+def test_local_feed_and_preferences():
     feed = client.get(
         "/feed/daily",
-        headers=headers,
         params={"level": "B1", "topics": "文化"},
     )
     assert feed.status_code == 200
@@ -55,16 +42,12 @@ def test_login_feed_and_preferences():
 
 
 def test_feed_switches_primary_article_with_cefr():
-    token = login()
-    headers = {"Authorization": f"Bearer {token}"}
     a2 = client.get(
         "/feed/daily",
-        headers=headers,
         params={"level": "A2", "topics": "文化"},
     ).json()
     b2 = client.get(
         "/feed/daily",
-        headers=headers,
         params={"level": "B2", "topics": "文化"},
     ).json()
     assert a2["primary"]["cefr"] == "A2"
@@ -378,16 +361,12 @@ def test_word_referent_validation_omits_dictionary_sense():
         )
 
 
-def test_production_mode_closes_demo_sms_and_protects_admin():
+def test_production_mode_protects_admin():
     previous_env = main_module.settings.app_env
     previous_token = main_module.settings.admin_api_token
     main_module.settings.app_env = "production"
     main_module.settings.admin_api_token = "admin-test-token"
     try:
-        sms = client.post("/auth/sms/send", json={"phone": "13800138000"})
-        assert sms.status_code == 503
-        assert sms.json()["detail"]["code"] == "SMS_PROVIDER_NOT_CONFIGURED"
-
         denied = client.get("/admin/providers")
         assert denied.status_code == 403
         allowed = client.get(
@@ -410,23 +389,35 @@ def test_provider_presets_match_settings_defaults():
 
 
 def test_local_only_learning_state_has_no_server_write_endpoints():
-    token = login()
-    headers = {"Authorization": f"Bearer {token}"}
     preference = client.put(
         "/profile/preferences",
-        headers=headers,
         json={"level": "B1", "topics": ["文化"], "minutes": 10, "reminder": "20:30"},
     )
     progress = client.put(
         "/reading-progress",
-        headers=headers,
         json={"contentId": "piece", "progress": 0.5},
     )
     vocabulary = client.post(
         "/vocabulary",
-        headers=headers,
         json={"contentId": "piece", "word": "bank", "translation": "河岸", "sentence": "A river bank."},
     )
     assert preference.status_code == 404
     assert progress.status_code == 404
     assert vocabulary.status_code == 404
+
+
+def test_local_feed_and_removed_auth_routes_need_no_account():
+    feed = client.get("/feed/daily", params={"level": "B1", "topics": "文化"})
+    assert feed.status_code == 200
+    assert feed.json()["primary"]["paragraphs"]
+    assert client.post("/auth/sms/send", json={"phone": "13800138000"}).status_code == 404
+    assert client.post(
+        "/auth/password/login", json={"username": "admin", "password": "not-needed"}
+    ).status_code == 404
+
+
+def test_feed_accepts_full_cefr_range_without_accounts():
+    for level in ("A1", "C2"):
+        response = client.get("/feed/daily", params={"level": level, "topics": "文化"})
+        assert response.status_code == 200
+        assert response.json()["primary"]["paragraphs"]

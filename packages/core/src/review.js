@@ -77,3 +77,55 @@ export function dueCards(items, limit = 20, now = new Date()) {
     .sort((left, right) => dueTime(left) - dueTime(right))
     .slice(0, limitCount);
 }
+
+export function startReviewSession(items, limit = 20, now = new Date()) {
+  const queue = dueCards(items, limit, now).map((item) => ({
+    ...item,
+    card: serializeCard(item.card ? cardFromRow(item.card) : newReviewCard(now)),
+  }));
+  return { queue, total: queue.length, completed: 0, history: [] };
+}
+
+export function currentReviewItem(session) {
+  return session?.queue?.[0] ?? null;
+}
+
+export function rateSessionCard(session, rating, now = new Date()) {
+  const item = currentReviewItem(session);
+  if (!item) return { session, item: null, after: null, log: null };
+  const outcome = scheduleReview(item.card, rating, now);
+  const previous = {
+    queue: [...session.queue],
+    completed: session.completed,
+  };
+  const remaining = session.queue.slice(1);
+  if (rating === Rating.Again) {
+    const insertAt = Math.min(3, remaining.length);
+    remaining.splice(insertAt, 0, { ...item, card: outcome.after });
+  }
+  return {
+    ...outcome,
+    item,
+    session: {
+      ...session,
+      queue: remaining,
+      completed: session.completed + (rating === Rating.Again ? 0 : 1),
+      history: [...session.history, { ...previous, item, before: outcome.before }],
+    },
+  };
+}
+
+export function undoReviewSession(session) {
+  const previous = session?.history?.at(-1);
+  if (!previous) return null;
+  return {
+    session: {
+      ...session,
+      queue: previous.queue,
+      completed: previous.completed,
+      history: session.history.slice(0, -1),
+    },
+    item: previous.item,
+    before: previous.before,
+  };
+}

@@ -13,7 +13,7 @@ from app.content_pipeline import (
     split_reading_sentences,
     validate_candidate,
 )
-from app.content_editorial import EditorialGateway, EditorialProvider
+from app.content_editorial import EditorialGateway, EditorialProvider, LEVEL_TARGETS
 from app import content_sources as content_sources_module
 from app.content_sources import (
     CdcEidAdapter,
@@ -682,6 +682,7 @@ def test_production_editorial_requires_aligned_translations_and_contextual_gloss
 
 
 def test_daily_edition_never_exceeds_twelve_active_level_variants(pipeline):
+    pipeline.settings.content_active_cefr_levels = "A2,B1,B2,C1"
     target = date(2026, 7, 27)
     with pipeline.database.session() as session:
         for index, topic in enumerate(TOPICS[:5]):
@@ -945,3 +946,13 @@ def test_publish_mixes_original_news_with_complete_stories(pipeline):
             for article_id in edition.article_ids
         ]
         assert any("Stellar Wind" in title for title in titles)
+
+
+def test_difficulty_metrics_cover_entry_and_advanced_levels():
+    simple = difficulty_metrics(["I like books. Trees give shade. We read today."])
+    advanced = difficulty_metrics([
+        "Whereas the epistemological ramifications of an apparently unremarkable institutional practice may initially elude even the most attentive observer, its cumulative consequences nevertheless become conspicuous once the underlying assumptions are systematically interrogated."
+    ])
+    assert simple["estimatedCefr"] == "A1"
+    assert advanced["estimatedCefr"] == "C2"
+    assert list(LEVEL_TARGETS) == ["A1", "A2", "B1", "B2", "C1", "C2"]

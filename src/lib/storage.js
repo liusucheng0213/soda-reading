@@ -50,6 +50,18 @@ export async function getLocalDocument(id) {
   return document ?? null;
 }
 
+export async function deleteLocalDocument(id) {
+  await withDatabase("readwrite", (store) => store.delete(id));
+}
+
+export async function replaceLocalDocuments(documents) {
+  await withDatabase("readwrite", (store) => {
+    store.clear();
+    for (const document of documents) store.put(document);
+    return null;
+  });
+}
+
 export function useStoredState(key, fallback) {
   const raw = localStorage.getItem(key);
   if (!raw) return fallback;
@@ -107,5 +119,34 @@ export function resolveAccountBase(packet, owner, bucket, fallback) {
   if (packet?.owner === owner) return packet.value;
   if (!owner) return fallback;
   return readAccountState(owner, bucket, fallback);
+}
+
+const ACCOUNT_BUCKETS = [
+  "resume",
+  "vocabulary",
+  "highlights",
+  "progress",
+  "readingDay",
+  "positions",
+  "articleFeedback",
+  "placement",
+];
+
+export function migrateLocalAccount(profile) {
+  const owners = [...new Set([profile?.username, "admin"].filter(Boolean))];
+  for (const bucket of ACCOUNT_BUCKETS) {
+    const localKey = accountStateKey("local", bucket);
+    if (localStorage.getItem(localKey) != null) continue;
+    for (const owner of owners) {
+      const sourceKey = accountStateKey(owner, bucket);
+      const raw = localStorage.getItem(sourceKey);
+      if (raw == null) continue;
+      localStorage.setItem(localKey, raw);
+      localStorage.removeItem(sourceKey);
+      break;
+    }
+  }
+  localStorage.removeItem("soda.session");
+  return "local";
 }
 

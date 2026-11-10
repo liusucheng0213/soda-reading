@@ -13,10 +13,12 @@ from .settings import Settings
 
 
 LEVEL_TARGETS = {
+    "A1": (160, 250, "Use very common everyday vocabulary, short simple sentences, and one concrete idea per sentence."),
     "A2": (250, 350, "Use common everyday vocabulary, short sentences, and one idea per sentence."),
     "B1": (350, 500, "Use clear standard English, moderate sentence length, and explain technical terms."),
     "B2": (500, 650, "Use varied sentence structures and precise academic vocabulary with sufficient context."),
     "C1": (650, 800, "Use nuanced, natural English and complex ideas while keeping the argument coherent."),
+    "C2": (800, 1000, "Use sophisticated natural English, implicit meaning, subtle evaluation, and complex ideas without simplifying the argument."),
 }
 
 

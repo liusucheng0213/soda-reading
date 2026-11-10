@@ -25,7 +25,7 @@ import {
   typefaceOptions,
 } from "../data.js";
 import { peekWordTranslation, translateSentence, translateWord } from "../lib/api.js";
-import { isSameVocabularyItem, vocabularyItemId } from "@soda-reading/core";
+import { isSameVocabularyItem, newReviewCard, normalizeChapters, vocabularyItemId } from "@soda-reading/core";
 import {
   annotateTokens,
   flattenSentences,
@@ -40,7 +40,7 @@ import {
   wordKeyAtChar,
 } from "../lib/reader.js";
 import {
-  collectFindHits,
+  collectChapterFindHits,
   clickKeepsAnnotation,
   copyText,
   glossText,
@@ -51,7 +51,7 @@ import {
   canUseSpeech,
   resumeSpeechIfStuck,
   listenHotkeyBlocked,
-  locateWordInArticle,
+  locateWordInChapters,
   markedRun,
   measureWidth,
   remainingMinutes,
@@ -60,6 +60,9 @@ import {
   vocabMatch,
   wordContextAt,
 } from "../lib/study.js";
+import { chapterIdFromKey, chapterOverallProgress, legacyLocationKeyForDocument, normalizeReadingPosition, updateReadingPosition, withChapterKey } from "../lib/readingPosition.js";
+import { ChapterNavigation } from "./reader/ChapterNavigation.jsx";
+import { ReadingCompletion } from "./ReadingCompletion.jsx";
 
 function keysInRange(unit, startKey, endKey) {
   const nodes = [...unit.querySelectorAll("[data-word-key]")];
@@ -226,7 +229,15 @@ function PhraseCluster({ items, status, result, marked, onSelect, onRetry, onSav
   );
 }
 
-export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChange, onThemeChange, onBack, vocabulary, onVocabularyChange, highlights, onHighlightsChange, progress, onProgress, focus, onFocusConsumed }) {
+export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChange, onThemeChange, onBack, vocabulary, onVocabularyChange, highlights, onHighlightsChange, progress, position, onProgress, focus, onFocusConsumed, feedback, onFeedback, onReview, onAdjustLevel }) {
+  const chapters = useMemo(() => normalizeChapters(article), [article]);
+  const savedPosition = normalizeReadingPosition({ chapters }, position, progress);
+  const [activeChapterId, setActiveChapterId] = useState(savedPosition.chapterId);
+  const activeChapterIndex = Math.max(0, chapters.findIndex((chapter) => chapter.id === activeChapterId));
+  const activeChapter = chapters[activeChapterIndex] ?? chapters[0];
+  const currentChapterProgress = savedPosition.chapterId === activeChapterId
+    ? savedPosition.chapterProgress
+    : Number(savedPosition.chapterOffsets?.[activeChapterId]) || 0;
   const [selectedWord, setSelectedWord] = useState(null);
   const [selectedSentence, setSelectedSentence] = useState(null);
   const [sentenceResult, setSentenceResult] = useState(null);
@@ -238,8 +249,12 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   const [copied, setCopied] = useState("");
+  const [internalFocus, setInternalFocus] = useState(null);
   const prefs = { ...defaultReadingPrefs, ...readingPrefs };
   const scrollRef = useRef(null);
+  const chapterDialogRef = useRef(null);
+  const listenContinuationRef = useRef("");
+  const pendingScrollKeyRef = useRef("");
   const listenRef = useRef(false);
   const listenCursorRef = useRef(-1);
   const listenGenRef = useRef(0);
@@ -250,6 +265,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const applyingScrollRef = useRef(false);
   const ignoreProgressRestoreRef = useRef(false);
   const articleIdRef = useRef(article.id);
+  const restoreChapterRef = useRef(activeChapterId);
   const wordRequestRef = useRef(null);
   const sentenceRequestRef = useRef(null);
   const ignoreClickRef = useRef(false);
@@ -275,8 +291,11 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     paintListenWord(listenWordKeyRef.current);
   });
 
-  const paragraphs = article.paragraphs?.length ? article.paragraphs : [];
-  const spoken = useMemo(() => flattenSentences(paragraphs), [paragraphs]);
+  const paragraphs = activeChapter?.paragraphs ?? [];
+  const spoken = useMemo(() => flattenSentences(paragraphs).map((item) => ({
+    ...item,
+    key: withChapterKey(item.key, activeChapterId),
+  })), [paragraphs, activeChapterId]);
   const spokenRef = useRef(spoken);
   spokenRef.current = spoken;
   const savedSet = useMemo(() => {
@@ -296,33 +315,62 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const markedKeys = useMemo(() => {
     const keys = new Set();
     for (const item of articleHighlights) {
-      for (const key of item.keys || []) keys.add(key);
+      for (const key of item.keys || []) {
+        keys.add(item.chapterId ? withChapterKey(key, item.chapterId) : legacyLocationKeyForDocument(article, key));
+      }
     }
     return keys;
-  }, [articleHighlights]);
-  const findMatches = useMemo(() => collectFindHits(paragraphs, findQuery), [paragraphs, findQuery]);
+  }, [articleHighlights, article]);
+  const findMatches = useMemo(() => collectChapterFindHits(chapters, findQuery), [chapters, findQuery]);
   const hitSet = useMemo(() => new Set(findMatches.flat()), [findMatches]);
   const currentMatch = findMatches[Math.min(findIndex, Math.max(0, findMatches.length - 1))] || [];
   const currentHit = currentMatch[0] || "";
   const currentHitSet = useMemo(() => new Set(currentMatch), [currentMatch]);
 
-  const reportProgress = (value) => {
-    if (value === progress) return;
+  const reportProgress = (value, chapterProgress = currentChapterProgress) => {
+    if (value === progress && chapterProgress === currentChapterProgress) return;
     ignoreProgressRestoreRef.current = true;
-    onProgress(value);
+    const nextPosition = updateReadingPosition(savedPosition, chapters, activeChapterId, chapterProgress);
+    onProgress(value, { ...nextPosition, progress: value });
+  };
+
+  const changeChapter = (chapterId) => {
+    if (!chapters.some((chapter) => chapter.id === chapterId) || chapterId === activeChapterId) {
+      chapterDialogRef.current?.close();
+      return;
+    }
+    if (listenRef.current) stopListening(true);
+    wordRequestRef.current?.abort();
+    sentenceRequestRef.current?.abort();
+    setSelectedWord(null);
+    setSelectedSentence(null);
+    setSentenceResult(null);
+    const previous = {
+      ...savedPosition,
+      chapterOffsets: { ...savedPosition.chapterOffsets, [activeChapterId]: currentChapterProgress },
+    };
+    const nextPosition = updateReadingPosition(previous, chapters, chapterId, previous.chapterOffsets[chapterId] ?? 0);
+    ignoreProgressRestoreRef.current = false;
+    userMovedRef.current = false;
+    onProgress(nextPosition.progress, nextPosition);
+    setActiveChapterId(chapterId);
+    chapterDialogRef.current?.close();
   };
 
   useEffect(() => {
     const articleChanged = articleIdRef.current !== article.id;
+    const chapterChanged = restoreChapterRef.current !== activeChapterId;
+    const locationChanged = articleChanged || chapterChanged;
     articleIdRef.current = article.id;
-    if (articleChanged) userMovedRef.current = false;
-    const ownWrite = !articleChanged && ignoreProgressRestoreRef.current;
+    restoreChapterRef.current = activeChapterId;
+    if (locationChanged) userMovedRef.current = false;
+    const ownWrite = !locationChanged && ignoreProgressRestoreRef.current;
     ignoreProgressRestoreRef.current = false;
     if (!shouldRestoreReadingOffset({
-      articleChanged,
+      articleChanged: locationChanged,
       ownWrite,
       userMoved: userMovedRef.current,
-      hasFocus: Boolean(focus?.word || focus?.sentence),
+      hasFocus: Boolean(focus?.word || focus?.sentence || internalFocus?.word || internalFocus?.sentence),
     })) {
       restoredProgress.current = true;
       return;
@@ -345,7 +393,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       if (settled || userMovedRef.current) return;
       const node = scrollRef.current;
       if (!node) return;
-      const target = pendingReadingOffset(node.scrollHeight, node.clientHeight, progress);
+      const target = pendingReadingOffset(node.scrollHeight, node.clientHeight, currentChapterProgress);
       if (target == null) return;
       settled = true;
       observer?.disconnect();
@@ -371,12 +419,21 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       window.clearTimeout(timer);
       window.clearTimeout(giveUp);
     };
-  }, [article.id, progress, focus?.word, focus?.sentence]);
+  }, [article.id, activeChapterId, progress, currentChapterProgress, focus?.word, focus?.sentence, internalFocus]);
 
   useEffect(() => {
-    if (!focus?.word && !focus?.sentence) return;
+    const targetFocus = focus ?? internalFocus;
+    if (!targetFocus?.word && !targetFocus?.sentence) return;
+    if (targetFocus.chapterId && targetFocus.chapterId !== activeChapterId) {
+      setActiveChapterId(targetFocus.chapterId);
+      return;
+    }
     userMovedRef.current = true;
-    const located = locateWordInArticle(paragraphs, focus);
+    const located = locateWordInChapters(chapters, targetFocus, activeChapterId);
+    if (located?.chapterId && located.chapterId !== activeChapterId) {
+      setActiveChapterId(located.chapterId);
+      return;
+    }
     const context = wordContextAt(paragraphs, located);
     const frame = requestAnimationFrame(() => {
       const key = located?.wordKey;
@@ -385,10 +442,27 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
           ?.scrollIntoView({ block: "center", behavior: "smooth" });
       }
       if (context?.keys?.length) requestWord(context);
-      onFocusConsumed?.();
+      if (focus) onFocusConsumed?.();
+      setInternalFocus(null);
     });
     return () => cancelAnimationFrame(frame);
-  }, [article.id, focus]);
+  }, [article.id, activeChapterId, focus, internalFocus]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const key = pendingScrollKeyRef.current;
+      if (key) {
+        scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(key)}"]`)
+          ?.scrollIntoView({ block: "center", behavior: "smooth" });
+        pendingScrollKeyRef.current = "";
+      }
+      if (listenContinuationRef.current === activeChapterId) {
+        listenContinuationRef.current = "";
+        startListening(0);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeChapterId]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -448,9 +522,15 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
 
   useEffect(() => {
     if (!findOpen || !currentHit) return;
+    const chapterId = chapterIdFromKey(currentHit);
+    if (chapterId && chapterId !== activeChapterId) {
+      pendingScrollKeyRef.current = currentHit;
+      changeChapter(chapterId);
+      return;
+    }
     const node = scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(currentHit)}"]`);
     node?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [findOpen, currentHit]);
+  }, [findOpen, currentHit, activeChapterId]);
 
   useEffect(() => {
     listenRef.current = false;
@@ -472,9 +552,10 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
 
   useEffect(() => {
     if (!listening || listenIndex < 0 || !spoken.length) return;
-    const next = spokenProgress(listenIndex, spoken.length);
-    if (next > progress) reportProgress(next);
-  }, [listenIndex, listening, spoken.length, progress]);
+    const chapterProgress = spokenProgress(listenIndex, spoken.length);
+    const next = chapterOverallProgress(chapters, activeChapterId, chapterProgress);
+    if (next > progress) reportProgress(next, chapterProgress);
+  }, [listenIndex, listening, spoken.length, progress, activeChapterId]);
 
   const requestWord = async (context) => {
     wordRequestRef.current?.abort();
@@ -662,16 +743,22 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       id,
       contentHash: article.contentHash ?? article.id,
       contentId: article.id,
+      chapterId: activeChapterId,
       word: selectedWord.word,
       sentence: selectedWord.sentence,
       before: selectedWord.before,
       after: selectedWord.after,
+      card: newReviewCard(),
       ...selectedWord.result,
     }]);
   };
 
-  const selectedHighlightId = selectedWord?.keys?.length ? highlightId(article.id, selectedWord.keys) : "";
-  const selectedIsMarked = articleHighlights.some((item) => item.id === selectedHighlightId);
+  const sameSelectedHighlight = (item) => {
+    const keys = (item.keys ?? []).map((key) => item.chapterId ? withChapterKey(key, item.chapterId) : legacyLocationKeyForDocument(article, key));
+    return keys.length === (selectedWord?.keys?.length ?? 0)
+      && keys.every((key, index) => key === selectedWord.keys[index]);
+  };
+  const selectedIsMarked = articleHighlights.some(sameSelectedHighlight);
   const selectedIsSaved = Boolean(
     selectedWord?.word
     && vocabulary.some((entry) => isSameVocabularyItem(entry, article.id, selectedWord.word, selectedWord.sentence)),
@@ -679,7 +766,10 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const articleWords = vocabulary.filter((item) => (item.contentId ?? item.contentHash) === article.id || (item.contentId ?? item.contentHash) === (article.contentHash ?? article.id));
   const needle = findQuery.trim();
   const listenRatio = spokenProgress(listenIndex, spoken.length);
-  const effectiveProgress = listenIndex >= 0 ? listenRatio : Math.max(progress, listenRatio);
+  const currentOverallProgress = chapterOverallProgress(chapters, activeChapterId, currentChapterProgress);
+  const effectiveProgress = listenIndex >= 0
+    ? chapterOverallProgress(chapters, activeChapterId, listenRatio)
+    : Math.max(progress, currentOverallProgress);
   const leftMinutes = remainingMinutes(article, effectiveProgress);
   const listenKey = spoken[listenIndex]?.key || "";
 
@@ -687,12 +777,13 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     if (!selectedWord?.keys?.length) return;
     const id = highlightId(article.id, selectedWord.keys);
     if (selectedIsMarked) {
-      onHighlightsChange((highlights ?? []).filter((item) => item.id !== id));
+      onHighlightsChange((highlights ?? []).filter((item) => !sameSelectedHighlight(item)));
       return;
     }
     onHighlightsChange([...(highlights ?? []), {
       id,
       articleId: article.id,
+      chapterId: activeChapterId,
       word: selectedWord.word,
       keys: selectedWord.keys,
       sentence: selectedWord.sentence,
@@ -707,8 +798,13 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     window.setTimeout(() => setCopied(""), 1400);
   };
 
-  const jumpToKey = (key) => {
+  const jumpToKey = (key, chapterId = chapterIdFromKey(key)) => {
     if (!key) return;
+    if (chapterId && chapterId !== activeChapterId) {
+      pendingScrollKeyRef.current = key;
+      changeChapter(chapterId);
+      return;
+    }
     const node = scrollRef.current?.querySelector(`[data-word-key="${CSS.escape(key)}"]`);
     node?.scrollIntoView({ block: "center", behavior: "smooth" });
   };
@@ -772,13 +868,24 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       if (listenGenRef.current !== gen || !listenRef.current) return;
       const item = items[index];
       if (!item) {
+        const nextChapter = chapters[activeChapterIndex + 1];
+        if (nextChapter) {
+          const completedOverall = chapterOverallProgress(chapters, activeChapterId, 1);
+          const completedPosition = updateReadingPosition(savedPosition, chapters, activeChapterId, 1);
+          onProgress(completedOverall, completedPosition);
+          const nextPosition = updateReadingPosition(completedPosition, chapters, nextChapter.id, 0);
+          onProgress(completedOverall, nextPosition);
+          listenContinuationRef.current = nextChapter.id;
+          setActiveChapterId(nextChapter.id);
+          return;
+        }
         listenRef.current = false;
         clearListenKeepAlive();
         setListening(false);
         moveListenWord("");
         setListenIndex(-1);
         listenCursorRef.current = -1;
-        reportProgress(1);
+        reportProgress(1, 1);
         return;
       }
       const chunks = speechChunks(item.text);
@@ -861,6 +968,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     onHighlightsChange([...(highlights ?? []), {
       id,
       articleId: article.id,
+      chapterId: activeChapterId,
       word: phraseFromItems(items, { start: 0, end: items.length - 1 }) || tokens[0].word,
       keys,
       sentence: item.text,
@@ -938,6 +1046,14 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
           <h1>{article.title}</h1>
           <p>{article.author ?? article.source}</p>
         </div>
+        {chapters.length > 1 && (
+          <ChapterNavigation
+            chapters={chapters}
+            currentId={activeChapterId}
+            chapterOffsets={{ ...savedPosition.chapterOffsets, [activeChapterId]: currentChapterProgress }}
+            onSelect={changeChapter}
+          />
+        )}
         <div className="reader-chapter">
           <span>还剩</span>
           <strong>{leftMinutes} 分钟</strong>
@@ -950,7 +1066,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       <section className="reader-main">
         <header className={`reader-header${canListen ? "" : " no-speech"}`}>
           <button className="reader-icon mobile-reader-back" onClick={onBack} aria-label="返回"><ArrowLeft size={24} /></button>
-          <span className="reader-piece-title">{article.title}</span>
+          <span className="reader-piece-title">{article.title}{chapters.length > 1 && <button type="button" className="chapter-menu-button" onClick={() => chapterDialogRef.current?.showModal()}>目录</button>}</span>
           <div className="reader-progress" aria-label={`还剩 ${leftMinutes} 分钟`}><span>{leftMinutes} 分钟</span><div><i style={{ width: `${effectiveProgress * 100}%` }} /></div></div>
           <button
             className={`reader-icon${listenDock ? " listening" : ""}${canListen ? "" : " speech-unavailable"}`}
@@ -979,6 +1095,15 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             aria-label="阅读设置"
           ><TextAa size={23} /></button>
         </header>
+        <dialog ref={chapterDialogRef} className="chapter-dialog" aria-labelledby="chapter-dialog-title">
+          <div className="chapter-dialog-head"><h2 id="chapter-dialog-title">章节目录</h2><form method="dialog"><button type="submit" aria-label="关闭目录"><X size={20} /></button></form></div>
+          <ChapterNavigation
+            chapters={chapters}
+            currentId={activeChapterId}
+            chapterOffsets={{ ...savedPosition.chapterOffsets, [activeChapterId]: currentChapterProgress }}
+            onSelect={changeChapter}
+          />
+        </dialog>
         {findOpen && (
           <div className="reader-find">
             <MagnifyingGlass size={16} />
@@ -1132,12 +1257,13 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             if (!restoredProgress.current || applyingScrollRef.current) return;
             const element = event.currentTarget;
             const ratio = element.scrollTop / Math.max(1, element.scrollHeight - element.clientHeight);
-            if (Math.abs(ratio - progress) <= 0.05) return;
+            if (Math.abs(ratio - currentChapterProgress) <= 0.05) return;
             userMovedRef.current = true;
-            reportProgress(Math.min(1, Math.max(0, ratio)));
+            const chapterProgress = Math.min(1, Math.max(0, ratio));
+            reportProgress(chapterOverallProgress(chapters, activeChapterId, chapterProgress), chapterProgress);
           }}
         >
-          <div className="reader-title-block"><span>{article.topic ?? "本地内容"} · {article.cefr}</span><h1>{article.title}</h1></div>
+          <div className="reader-title-block"><span>{article.topic ?? "本地内容"} · {article.cefr}</span><h1>{article.title}</h1>{chapters.length > 1 && <p>{activeChapter?.title}</p>}</div>
           {paragraphs.map((paragraph, paragraphIndex) => {
             const sentences = splitSentences(paragraph);
             const previousSentences = paragraphIndex > 0 ? splitSentences(paragraphs[paragraphIndex - 1]) : [];
@@ -1146,10 +1272,10 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
               <p
                 className="reader-paragraph"
                 data-paragraph={paragraphIndex}
-                key={`${article.id}-${paragraphIndex}`}
+                key={`${article.id}-${activeChapterId}-${paragraphIndex}`}
               >
                 {sentences.map((sentence, sentenceIndex) => {
-                  const sentenceKey = `${paragraphIndex}-${sentenceIndex}`;
+                  const sentenceKey = withChapterKey(`${paragraphIndex}-${sentenceIndex}`, activeChapterId);
                   const { body: sentenceBody, ending: sentenceEnding } = splitSentenceEnding(sentence);
                   const before = sentences[sentenceIndex - 1] ?? previousSentences.at(-1) ?? "";
                   const after = sentences[sentenceIndex + 1] ?? nextSentences[0] ?? "";
@@ -1308,6 +1434,24 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
               </p>
             );
           })}
+          {chapters.length > 1 && (
+            <nav className="chapter-pager" aria-label="切换章节">
+              <button type="button" disabled={activeChapterIndex === 0} onClick={() => changeChapter(chapters[activeChapterIndex - 1]?.id)}>上一章</button>
+              <span>{activeChapterIndex + 1} / {chapters.length}</span>
+              <button type="button" disabled={activeChapterIndex === chapters.length - 1} onClick={() => changeChapter(chapters[activeChapterIndex + 1]?.id)}>下一章</button>
+            </nav>
+          )}
+          {activeChapterIndex === chapters.length - 1 && (
+            <ReadingCompletion
+              article={article}
+              vocabularyCount={articleWords.length}
+              feedback={feedback}
+              onFeedback={onFeedback}
+              onReview={onReview}
+              onAdjustLevel={onAdjustLevel}
+              onBack={onBack}
+            />
+          )}
         </article>
       </section>
       <aside className="reader-study-panel">
@@ -1352,7 +1496,10 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             <div className="study-recent">
               <span>划线</span>
               {articleHighlights.map((item) => (
-                <button type="button" className="study-jump" key={item.id} onClick={() => jumpToKey(item.keys?.[0])}>
+                <button type="button" className="study-jump" key={item.id} onClick={() => {
+                  const key = item.chapterId ? withChapterKey(item.keys?.[0], item.chapterId) : legacyLocationKeyForDocument(article, item.keys?.[0]);
+                  jumpToKey(key, chapterIdFromKey(key) || activeChapterId);
+                }}>
                   <strong>{item.word}</strong>
                   <span>{item.sentence}</span>
                 </button>
@@ -1365,12 +1512,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
                   type="button"
                   className="study-jump"
                   key={item.id}
-                  onClick={() => {
-                    const located = locateWordInArticle(paragraphs, item);
-                    const context = wordContextAt(paragraphs, located);
-                    if (located?.wordKey) jumpToKey(located.wordKey);
-                    if (context?.keys?.length) requestWord(context);
-                  }}
+                  onClick={() => setInternalFocus(item)}
                 >
                   <strong>{item.word}</strong>
                   <span>{glossText(item)}</span>

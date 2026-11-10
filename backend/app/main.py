@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone
-from secrets import compare_digest, token_urlsafe
+from datetime import datetime, timezone
+from secrets import compare_digest
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -10,11 +10,8 @@ from .provider_config import public_config, save_overrides
 from .schemas import (
     ArticleReviewRequest,
     ContentRunRequest,
-    PasswordLoginRequest,
     Preferences,
     ProviderConfigRequest,
-    SmsSendRequest,
-    SmsVerifyRequest,
     TranslationRequest,
 )
 from .settings import Settings, get_settings
@@ -32,20 +29,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-sms_requests: dict[str, datetime] = {}
-sessions: dict[str, dict] = {}
-
-
-def current_user(authorization: str | None = Header(default=None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="需要登录")
-    token = authorization.removeprefix("Bearer ")
-    user = sessions.get(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="登录已失效")
-    return user
-
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
     if settings.app_env == "development":
@@ -75,85 +58,13 @@ async def health() -> dict:
     }
 
 
-@app.post("/auth/sms/send")
-async def send_sms(payload: SmsSendRequest) -> dict:
-    if settings.app_env != "development":
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "SMS_PROVIDER_NOT_CONFIGURED",
-                "message": "生产短信服务尚未接入",
-                "retryable": False,
-            },
-        )
-    sms_requests[payload.phone] = datetime.now(timezone.utc) + timedelta(minutes=5)
-    response = {"requestId": token_urlsafe(12), "expiresIn": 300, "provider": "development"}
-    if settings.dev_sms_code:
-        response["devCode"] = settings.dev_sms_code
-    return response
-
-
-@app.post("/auth/sms/verify")
-async def verify_sms(payload: SmsVerifyRequest) -> dict:
-    if settings.app_env != "development":
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "SMS_PROVIDER_NOT_CONFIGURED",
-                "message": "生产短信服务尚未接入",
-                "retryable": False,
-            },
-        )
-    expires = sms_requests.get(payload.phone)
-    if (
-        not settings.dev_sms_code
-        or not expires
-        or expires < datetime.now(timezone.utc)
-        or payload.code != settings.dev_sms_code
-    ):
-        raise HTTPException(status_code=400, detail="验证码错误或已过期")
-    token = token_urlsafe(32)
-    user = {"id": f"user-{payload.phone[-4:]}", "phone": payload.phone}
-    sessions[token] = user
-    return {"accessToken": token, "user": user}
-
-
-@app.post("/auth/password/login")
-async def password_login(payload: PasswordLoginRequest) -> dict:
-    username = payload.username.strip().lower()
-    if settings.app_env != "development":
-        raise HTTPException(status_code=503, detail="本地密码登录仅用于开发环境")
-    expected_username = settings.local_admin_username.strip().lower()
-    expected_password = settings.local_admin_password
-    if not expected_password or username != expected_username or payload.password != expected_password:
-        raise HTTPException(status_code=401, detail="用户名或密码不正确")
-    token = token_urlsafe(32)
-    user = {"id": "local-admin", "username": expected_username}
-    sessions[token] = user
-    return {
-        "accessToken": token,
-        "user": user,
-        "profile": {
-            "username": expected_username,
-            "role": "admin",
-            "level": "B1",
-            "topics": ["科技", "文化"],
-            "minutes": 10,
-            "reminder": "20:30",
-            "reviewLimit": 20,
-            "onboarded": True,
-        },
-    }
-
-
 @app.get("/feed/daily")
 async def feed(
-    level: Literal["A2", "B1", "B2", "C1"] = "B1",
+    level: Literal["A1", "A2", "B1", "B2", "C1", "C2"] = "B1",
     topics: list[str] = Query(default=["科技", "文化"], min_length=1, max_length=4),
-    user: dict = Depends(current_user),
 ) -> dict:
     preferences = Preferences(level=level, topics=topics)
-    return content_service.daily_feed(preferences.model_dump(), user["id"])
+    return content_service.daily_feed(preferences.model_dump(), "local-user")
 
 
 @app.post("/translations/word")

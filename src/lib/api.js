@@ -2,9 +2,6 @@ import { contextualDictionary, dailyAlternatives, demoArticle, fallbackLibrary }
 import { displayFeed } from "./feed.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
-const LOCAL_ADMIN_USERNAME = String(import.meta.env.VITE_LOCAL_ADMIN_USERNAME || "admin").trim().toLowerCase();
-const LOCAL_ADMIN_PASSWORD = String(import.meta.env.VITE_LOCAL_ADMIN_PASSWORD || "");
-const LOCAL_DEV_SMS_CODE = String(import.meta.env.VITE_DEV_SMS_CODE || "");
 const translationMemoryCache = new Map();
 const inflightTranslations = new Map();
 const TRANSLATION_MEMORY_LIMIT = 400;
@@ -93,43 +90,6 @@ export class ApiError extends Error {
   }
 }
 
-export async function loginWithPassword(username, password) {
-  try {
-    const result = await request("/auth/password/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    });
-    return {
-      session: {
-        accessToken: result.accessToken,
-        user: result.user,
-      },
-      profile: result.profile,
-    };
-  } catch (error) {
-    if (!import.meta.env.DEV || !LOCAL_ADMIN_PASSWORD) throw error;
-    if (username.trim().toLowerCase() !== LOCAL_ADMIN_USERNAME || password !== LOCAL_ADMIN_PASSWORD) throw error;
-    return {
-      session: {
-        accessToken: "local-admin-session",
-        user: { id: "local-admin", username: LOCAL_ADMIN_USERNAME },
-      },
-      profile: {
-        username: LOCAL_ADMIN_USERNAME,
-        role: "admin",
-        level: "B1",
-        topics: ["科技", "文化"],
-        minutes: 10,
-        reminder: "20:30",
-        reviewLimit: 20,
-        onboarded: true,
-      },
-    };
-  }
-}
-
-export async function logout() {}
-
 export async function saveProfile(profile) {
   return {
     ...profile,
@@ -191,38 +151,15 @@ async function request(path, options = {}) {
   }
 }
 
-export async function sendSms(phone) {
-  try {
-    return await request("/auth/sms/send", { method: "POST", body: JSON.stringify({ phone }) });
-  } catch (error) {
-    if (!import.meta.env.DEV || !LOCAL_DEV_SMS_CODE) throw error;
-    return { requestId: "local-demo", expiresIn: 300, devCode: LOCAL_DEV_SMS_CODE, provider: "local" };
-  }
-}
-
-export async function verifySms(phone, code) {
-  try {
-    return await request("/auth/sms/verify", { method: "POST", body: JSON.stringify({ phone, code }) });
-  } catch (error) {
-    if (!import.meta.env.DEV || !LOCAL_DEV_SMS_CODE) throw error;
-    if (code !== LOCAL_DEV_SMS_CODE) throw new Error("验证码不正确");
-    return { accessToken: `demo-${phone}`, user: { id: `user-${phone.slice(-4)}`, phone } };
-  }
-}
-
-export async function getDailyFeed(token, preferences = {}) {
+export async function getDailyFeed(preferences = {}) {
   const query = new URLSearchParams({ level: preferences.level || "B1" });
   for (const topic of preferences.topics?.length ? preferences.topics.slice(0, 4) : ["文化"]) {
     query.append("topics", topic);
   }
   let live;
   try {
-    live = await request(`/feed/daily?${query}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 4000,
-    });
-  } catch (error) {
-    if (!import.meta.env.DEV) throw error;
+    live = await request(`/feed/daily?${query}`, { timeout: 4000 });
+  } catch {
     live = {
       primary: demoArticle,
       alternatives: dailyAlternatives,

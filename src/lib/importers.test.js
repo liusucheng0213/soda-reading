@@ -19,7 +19,7 @@ describe("EPUB import", () => {
             <dc:creator>Ada</dc:creator>
           </metadata>
           <manifest>
-            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"/>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
             <item id="c1" href="chap%20one.xhtml#opening" media-type="application/xhtml+xml"/>
           </manifest>
           <spine>
@@ -27,7 +27,7 @@ describe("EPUB import", () => {
             <itemref idref="c1"/>
           </spine>
         </package>`),
-      "OEBPS/nav.xhtml": strToU8("<html><body><p>Contents should stay out of the reading text.</p></body></html>"),
+      "OEBPS/nav.xhtml": strToU8("<html><body><nav><ol><li><a href=\"chap%20one.xhtml#opening\">Opening</a></li></ol></nav></body></html>"),
       "OEBPS/chap one.xhtml": strToU8(`<html xmlns="http://www.w3.org/1999/xhtml"><body>
         <nav><a href="nav.xhtml">Contents</a></nav>
         <p>Cities can feel much hotter than the fields around them.</p>
@@ -37,9 +37,11 @@ describe("EPUB import", () => {
     expect(book.title).toBe("Shade Notes");
     expect(book.author).toBe("Ada");
     expect(book.text).toBe("Cities can feel much hotter than the fields around them.\n\nTrees make the street cooler.");
-    expect(book.chapters).toEqual([
-      "Cities can feel much hotter than the fields around them.\n\nTrees make the street cooler.",
-    ]);
+    expect(book.chapters).toMatchObject([{
+      id: "chapter-0001",
+      title: "Opening",
+      paragraphs: ["Cities can feel much hotter than the fields around them.", "Trees make the street cooler."],
+    }]);
   });
 
   it("reads a Windows Notepad UTF-16 text file", () => {

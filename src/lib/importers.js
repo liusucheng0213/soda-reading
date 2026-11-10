@@ -1,5 +1,6 @@
 import { unzipSync, strFromU8 } from "fflate";
 import { assertSafeZip, estimateReadingMinutes, sha256 } from "./reader.js";
+import { chaptersFromPages, normalizeChapters, splitTextIntoChapters } from "@soda-reading/core";
 
 export const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_EXPANDED_SIZE = 100 * 1024 * 1024;
@@ -135,6 +136,40 @@ function decodeZipPath(value) {
   }
 }
 
+function archiveBase(path) {
+  return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+}
+
+function epubNavigationTitles(entries, base, items) {
+  const titles = new Map();
+  const navItem = items.find((item) => (item.getAttribute("properties") || "").split(/\s+/).includes("nav"));
+  if (navItem) {
+    const path = resolveArchivePath(base, decodeZipPath(navItem.getAttribute("href")));
+    if (entries[path]) {
+      const document = new DOMParser().parseFromString(strFromU8(entries[path]), "text/html");
+      const navs = xmlElements(document, "nav");
+      const toc = navs.find((nav) => nav.getAttribute("epub:type") === "toc" || nav.getAttribute("type") === "toc") || navs[0];
+      for (const anchor of xmlElements(toc || document, "a")) {
+        const label = anchor.textContent?.replace(/\s+/g, " ").trim();
+        const target = resolveArchivePath(archiveBase(path), decodeZipPath(anchor.getAttribute("href")));
+        if (label && target) titles.set(target, label);
+      }
+    }
+  }
+  if (titles.size) return titles;
+  const ncxItem = items.find((item) => item.getAttribute("media-type") === "application/x-dtbncx+xml");
+  const ncxPath = ncxItem ? resolveArchivePath(base, decodeZipPath(ncxItem.getAttribute("href"))) : "";
+  if (!ncxPath || !entries[ncxPath]) return titles;
+  const ncx = new DOMParser().parseFromString(strFromU8(entries[ncxPath]), "application/xml");
+  for (const point of xmlElements(ncx, "navPoint")) {
+    const label = xmlElements(point, "text")[0]?.textContent?.replace(/\s+/g, " ").trim();
+    const source = xmlElements(point, "content")[0]?.getAttribute("src");
+    const target = resolveArchivePath(archiveBase(ncxPath), decodeZipPath(source));
+    if (label && target) titles.set(target, label);
+  }
+  return titles;
+}
+
 export function epubFromEntries(entries) {
   if (entries["META-INF/encryption.xml"]) throw new Error("暂不支持带 DRM 或加密内容的 EPUB");
   const container = entries["META-INF/container.xml"];
@@ -145,18 +180,33 @@ export function epubFromEntries(entries) {
   const opf = new DOMParser().parseFromString(strFromU8(entries[rootfile]), "application/xml");
   const title = xmlElements(opf, "title")[0]?.textContent?.trim();
   const author = xmlElements(opf, "creator")[0]?.textContent?.trim();
-  const manifest = new Map(xmlElements(opf, "item").map((item) => [item.getAttribute("id"), item.getAttribute("href")]));
-  const base = rootfile.includes("/") ? rootfile.slice(0, rootfile.lastIndexOf("/")) : "";
+  const items = xmlElements(opf, "item");
+  const manifest = new Map(items.map((item) => [item.getAttribute("id"), item]));
+  const base = archiveBase(rootfile);
+  const navigationTitles = epubNavigationTitles(entries, base, items);
   const chapters = xmlElements(opf, "itemref")
     .filter((item) => (item.getAttribute("linear") || "yes").toLowerCase() !== "no")
     .map((item) => manifest.get(item.getAttribute("idref")))
     .filter(Boolean)
-    .map((href) => entries[resolveArchivePath(base, decodeZipPath(href))])
-    .filter(Boolean)
-    .map((value) => htmlToText(strFromU8(value)))
+    .map((item, index) => {
+      const path = resolveArchivePath(base, decodeZipPath(item.getAttribute("href")));
+      if (!entries[path]) return null;
+      const html = strFromU8(entries[path]);
+      const text = htmlToText(html);
+      if (!text) return null;
+      const document = new DOMParser().parseFromString(html, "text/html");
+      const heading = document.querySelector("h1,h2,h3")?.textContent?.replace(/\s+/g, " ").trim();
+      return {
+        title: navigationTitles.get(path) || heading || `第 ${index + 1} 章`,
+        paragraphs: text.split(/\n{2,}/).map(cleanText).filter(Boolean),
+        source: { href: path },
+      };
+    })
     .filter(Boolean);
-  if (!chapters.length) throw new Error("EPUB 中没有可阅读的正文");
-  return { title, author, text: chapters.join("\n\n"), chapters };
+  const normalized = normalizeChapters({ chapters });
+  if (!normalized.length) throw new Error("EPUB 中没有可阅读的正文");
+  const paragraphs = normalized.flatMap((chapter) => chapter.paragraphs);
+  return { title, author, text: paragraphs.join("\n\n"), chapters: normalized };
 }
 
 async function parseEpub(buffer) {
@@ -183,7 +233,7 @@ async function parsePdf(buffer) {
     }
     const text = pages.filter(Boolean).join("\n\n");
     if (text.length < 100) throw new Error("PDF 几乎没有可提取文字，可能是扫描件；首版暂不支持 OCR");
-    return { text, chapters: pages.filter(Boolean) };
+    return { text, chapters: chaptersFromPages(pages) };
   } finally {
     await pdf.destroy?.();
   }
@@ -200,7 +250,11 @@ export async function inspectAndParseFile(file) {
   else parsed = await parsePdf(buffer);
   if (!parsed.text || parsed.text.length < 40) throw new Error("文件中没有足够的英文正文");
   const id = await sha256(buffer);
-  const paragraphs = parsed.text.split(/\n{2,}/).map(cleanText).filter(Boolean);
+  const chapters = normalizeChapters({
+    chapters: extension === "txt" ? splitTextIntoChapters(parsed.text) : parsed.chapters,
+    paragraphs: parsed.text.split(/\n{2,}/).map(cleanText).filter(Boolean),
+  });
+  const paragraphs = chapters.flatMap((chapter) => chapter.paragraphs);
   return {
     id,
     title: parsed.title || file.name.replace(/\.[^.]+$/, ""),
@@ -210,6 +264,7 @@ export async function inspectAndParseFile(file) {
     publishedAt: new Date().toISOString(),
     cefr: "未评估",
     readingMinutes: estimateReadingMinutes(parsed.text),
+    chapters,
     paragraphs,
     importedAt: new Date().toISOString(),
     fileName: file.name,

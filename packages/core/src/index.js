@@ -2,6 +2,7 @@ import { normalizeWord } from "./reader.js";
 
 export * from "./reader.js";
 export * from "./gloss.js";
+export * from "./chapters.js";
 export * from "./library.js";
 export * from "./review.js";
 export { assertSafeZip } from "./zip.js";
@@ -38,7 +39,7 @@ export function isSameVocabularyItem(item, contentId, word, sentence = "") {
     && compactSentence(item.sentence) === compactSentence(sentence);
 }
 
-export const CEFR_LEVELS = ["A2", "B1", "B2", "C1"];
+export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 export const INTEREST_TOPICS = ["科技", "文化", "商业", "自然", "健康", "历史"];
 export const DEFAULT_REVIEW_LIMIT = 20;
 

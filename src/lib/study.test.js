@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { dueCards, savedVocabularySense, sentenceKey, vocabularyItemId } from "@soda-reading/core";
-import { collectFindHits, copyText, glossText, hasCommonGloss, listenHotkeyBlocked, locateWordInArticle, markedRun, uniqueArticles, vocabMatch, vocabSource, applyReadingProgress, canUseSpeech, keepShownGloss, mergeRemoteProgress, mergeVocabulary, resumeFromProgress, isCurrentSave, pendingReadingOffset, resumeSpeechIfStuck, shouldFlushProgressOnHide, shouldRestoreReadingOffset, todayReadMinutes, vocabularyRemoteSave } from "./study.js";
+import { collectChapterFindHits, collectFindHits, copyText, glossText, hasCommonGloss, listenHotkeyBlocked, locateWordInArticle, locateWordInChapters, markedRun, uniqueArticles, vocabMatch, vocabSource, applyReadingProgress, canUseSpeech, keepShownGloss, mergeRemoteProgress, mergeVocabulary, resumeFromProgress, isCurrentSave, pendingReadingOffset, resumeSpeechIfStuck, shouldFlushProgressOnHide, shouldRestoreReadingOffset, todayReadMinutes, vocabularyRemoteSave } from "./study.js";
 
 describe("study helpers", () => {
   it("keeps the first complete article for each id", () => {
@@ -246,5 +246,46 @@ describe("study helpers", () => {
       { id: "ready", card: { due: "2026-10-14T00:00:00.000Z" } },
     ], 20, now);
     expect(due.map((item) => item.id)).toEqual(["broken", "ready"]);
+  });
+});
+
+
+describe("chapter-aware source lookup", () => {
+  it("locates a saved word with stable chapter-prefixed keys", () => {
+    const located = locateWordInArticle(
+      ["The second chapter has shade."],
+      { word: "shade", sentence: "The second chapter has shade.", chapterId: "chapter-0002" },
+      "chapter-0002",
+    );
+    expect(located.wordKey.startsWith("chapter-0002:")).toBe(true);
+    expect(located.sentenceKey.startsWith("chapter-0002:")).toBe(true);
+  });
+
+  it("keeps find hits from equal token positions in different chapters separate", () => {
+    const hits = collectChapterFindHits([
+      { id: "chapter-0001", paragraphs: ["Shade here."] },
+      { id: "chapter-0002", paragraphs: ["Shade there."] },
+    ], "shade");
+    expect(hits).toEqual([["chapter-0001:0-0-0"], ["chapter-0002:0-0-0"]]);
+  });
+});
+
+
+describe("vocabulary source identity", () => {
+  it("does not match an unrelated article when both content hashes are missing", () => {
+    const unrelated = { id: "demo", title: "Wrong article", paragraphs: ["Wrong."] };
+    expect(vocabSource([unrelated], { contentId: "actual-book", word: "shade" })).toBeNull();
+  });
+});
+
+
+describe("cross-chapter vocabulary lookup", () => {
+  it("finds a legacy saved word outside the currently open chapter", () => {
+    const located = locateWordInChapters([
+      { id: "chapter-0001", paragraphs: ["The opening has trees."] },
+      { id: "chapter-0002", paragraphs: ["The second chapter has shade."] },
+    ], { word: "shade", sentence: "The second chapter has shade." }, "chapter-0001");
+    expect(located.chapterId).toBe("chapter-0002");
+    expect(located.wordKey.startsWith("chapter-0002:")).toBe(true);
   });
 });

@@ -283,14 +283,18 @@ def difficulty_metrics(paragraphs: list[str]) -> dict[str, Any]:
     sentence_length = metrics["averageSentenceLength"]
     complexity = metrics["complexMarkerDensity"]
     long_density = metrics["longWordDensity"]
-    if sentence_length <= 13 and complexity <= 0.25 and long_density <= 0.12:
+    if sentence_length <= 9 and complexity <= 0.15 and long_density <= 0.08:
+        estimated = "A1"
+    elif sentence_length <= 13 and complexity <= 0.25 and long_density <= 0.12:
         estimated = "A2"
     elif sentence_length <= 18 and complexity <= 0.55 and long_density <= 0.18:
         estimated = "B1"
     elif sentence_length <= 24 and complexity <= 0.9 and long_density <= 0.24:
         estimated = "B2"
-    else:
+    elif sentence_length <= 32 and complexity <= 1.2 and long_density <= 0.32:
         estimated = "C1"
+    else:
+        estimated = "C2"
     metrics["estimatedCefr"] = estimated
     return metrics
 
@@ -1014,9 +1018,10 @@ class ContentPipeline:
         traceability = 25 if evidence and result.get("factClaims") else (18 if evidence else 0)
         coherence = 20 if coherent else 8
         minimum, maximum, _ = LEVEL_TARGETS[level]
+        level_order = list(LEVEL_TARGETS)
         level_distance = abs(
-            ["A2", "B1", "B2", "C1"].index(level)
-            - ["A2", "B1", "B2", "C1"].index(metrics["estimatedCefr"])
+            level_order.index(level)
+            - level_order.index(metrics["estimatedCefr"])
         )
         language = (
             20

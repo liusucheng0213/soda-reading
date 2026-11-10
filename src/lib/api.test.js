@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearTranslationMemory, loginWithPassword, peekWordTranslation, translateWord } from "./api.js";
+import { clearTranslationMemory, peekWordTranslation, translateWord } from "./api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -129,16 +129,6 @@ describe("word translation API contract", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("does not describe a login failure as a translation failure", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => {
-      throw new Error("offline");
-    }));
-    await expect(loginWithPassword("reader", "secret")).rejects.toMatchObject({
-      message: "无法连接服务，请检查后端是否已启动",
-      code: "NETWORK_ERROR",
-    });
-  });
-
   it("keeps the translation timeout wording on the translation route", async () => {
     vi.useFakeTimers();
     try {
@@ -172,5 +162,16 @@ describe("word translation API contract", () => {
   it("does not expose a password-change success no-op", async () => {
     const api = await import("./api.js");
     expect(api.changePassword).toBeUndefined();
+  });
+});
+
+
+describe("local daily feed", () => {
+  it("needs no token and falls back to the requested local level when offline", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    const { getDailyFeed } = await import("./api.js");
+    const feed = await getDailyFeed({ level: "A2", topics: ["自然"] });
+    expect(feed.primary.cefr).toBe("A2");
+    expect(feed.primary.paragraphs.length).toBeGreaterThan(0);
   });
 });

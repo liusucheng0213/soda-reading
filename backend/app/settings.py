@@ -12,9 +12,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "development"
-    dev_sms_code: str = ""
-    local_admin_username: str = "admin"
-    local_admin_password: str = ""
     admin_api_token: str = ""
     allowed_origins: str = "http://localhost:4173,http://127.0.0.1:4173"
 
@@ -49,7 +46,7 @@ class Settings(BaseSettings):
     content_discovery_max: int = 2000
     content_target_clusters: int = 30
     content_timezone: str = "Asia/Shanghai"
-    content_active_cefr_levels: str = "A2,B1,B2,C1"
+    content_active_cefr_levels: str = "A1,A2,B1,B2,C1,C2"
     content_max_daily_variants: int = 12
     content_publish_offset_days: int = 0
     content_source_timeout_seconds: float = 25
@@ -76,7 +73,7 @@ class Settings(BaseSettings):
 
     @property
     def configured_cefr_levels(self) -> list[str]:
-        valid = {"A2", "B1", "B2", "C1"}
+        valid = {"A1", "A2", "B1", "B2", "C1", "C2"}
         levels = [
             level.strip().upper()
             for level in self.content_active_cefr_levels.split(",")

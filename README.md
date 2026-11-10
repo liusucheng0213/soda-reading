@@ -6,23 +6,25 @@
 [![Language](https://img.shields.io/badge/language-JavaScript%20%7C%20Python-3178c6.svg)](package.json)
 [![Platform](https://img.shields.io/badge/platform-Web-111111.svg)](https://github.com/liusucheng0213/soda-reading)
 
-网页使用 Vite + React，翻译和采集走本机 FastAPI。进度、生词、划线和偏好留在浏览器里。产品细节见 [docs/project-overview.md](docs/project-overview.md)。
+网页使用 Vite + React，翻译和采集走可选的本机 FastAPI。无需登录；进度、生词、划线和偏好留在浏览器里。产品细节见 [docs/project-overview.md](docs/project-overview.md)。
 
 ## 体验路径
 
-1. 打开今日，在 A2 / B1 / B2 / C1 之间切换，主文章会换成有正文的那一篇。
-2. 进入正文，点一个词，中文语境义出现在词的正下方，不挡住下一行。
-3. 点句末标点，整句中文插在该句下面；再点一次收起。
-4. 打开朗读，可以暂停、再读本句、从此句朗读，并把正在听的句子划出来。
+1. 直接打开应用；可先做大致水平测试，也可手动选择 A1–C2。
+2. 进入正文，点一个词，中文语境义出现在词的正下方，可主动收藏到生词本。
+3. 点句末标点展开整句中文；打开朗读可暂停、再读本句、从此句朗读并划出本句。
+4. 导入书籍后按章节目录阅读；生词复习支持主动回忆、四档评分、忘记重排和撤销。
+5. 在「我的」导出或恢复完整本地备份。
 
 ## 核心功能
 
-- 按 CEFR 切换今日文章，并显示中文导读。
+- A1–C2 本地水平测试与今日文章切换，结果只作为大致阅读建议。
 - 点词行间注、点句整句译文；代词只显示文中指代。
-- 全文朗读、句级跟读、慢/常/快、查找、复制原句、剩余分钟。
-- 划线、生词本和 FSRS 复习；生词里的「原文」回到当时那一句。
-- 书架包含编辑目录，以及浏览器内导入的 EPUB、TXT 和文本型 PDF。
-- 管理端配置采集、自动验证和翻译模型路由。密钥留在本机。
+- 全文逐章听读、句级跟读、慢/常/快、跨章查找、复制原句和剩余分钟。
+- 划线、生词本和 FSRS 复习；复习支持空格揭示、数字键 1–4 评分与撤销，「原文」回到正确章节。
+- EPUB/TXT 章节目录、PDF 页码导航、按章阅读位置和全书加权进度。
+- 本地 JSON 备份/恢复、书籍删除和分类清空；不包含模型密钥。
+- 本机 `/admin` 保留手动采集、自动验证和模型路由；阅读端没有账号或管理入口。
 
 ## 架构
 
@@ -38,7 +40,7 @@ flowchart LR
   sources["许可原文 RSS 官方 API 维基"]
 
   browser --> storage
-  browser -->|"查词 登录 今日源"| api
+  browser -->|"查词 今日源"| api
   api --> db
   api --> providers
   api --> sources
@@ -46,9 +48,9 @@ flowchart LR
 
 ## 本地数据与离线边界
 
-开发服务器在后端未启动时，可以使用已配置的本地开发登录回退和内置文章；该回退只在 `import.meta.env.DEV` 下生效。生产构建的登录和在线今日源需要 FastAPI，静态预览不是无后端登录模式。
+后端未启动时，开发和生产页面都可使用内置文章、本地书籍、水平测试与复习；在线今日源和云端词译需要 FastAPI。阅读交互在 `src/screens/ReaderScreen.jsx`，章节、文本切分和复习在 `packages/core`。
 
-没填翻译密钥时，查词会失败，或只显示有限的本地语料。阅读进度、生词、划线、偏好和翻译记忆仍写在浏览器里。阅读交互在 `src/screens/ReaderScreen.jsx`，分词、句切分和复习在 `packages/core`。
+没填翻译密钥时，查词会失败，或只显示有限的本地语料。阅读进度、生词、划线、偏好和翻译记忆仍写在浏览器里。导入书籍使用 IndexedDB，其余个人数据使用 localStorage；「我的 → 数据管理」可导出和恢复完整 JSON 备份。
 
 ## 运行依赖
 
@@ -71,7 +73,7 @@ Copy-Item .env.example .env
 Copy-Item backend\.env.example backend\.env
 ```
 
-在两个 `.env` 里填写同一组本地口令。不要复用旧源码或旧提交里的演示口令。数值型配置保持注释，不要写成空值。
+阅读端不需要账号或口令。只有使用在线翻译、内容采集或管理接口时才需要配置后端环境；模型密钥只写在 `backend/.env`。数值型配置保持注释，不要写成空值。
 
 只填写 `DEEPSEEK_API_KEY` 不会启用付费调用。DeepSeek、cheapApi 和自定义计费线路都需要显式付费开关、正数每日预算和单次上限；默认配置为零预算阻断。当前阅读端的启用示例见 [翻译配置指南](docs/translation-provider-setup.md)。
 
@@ -89,7 +91,7 @@ $env:PYTHONPATH="."
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-在仓库根目录检查前端和两个构建；`build:admin` 会额外断言产物不含阅读端登录与阅读控件：
+在仓库根目录检查前端和两个构建；`build:admin` 会额外断言产物不含阅读端控件：
 
 ```powershell
 npm test

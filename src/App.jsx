@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BookOpenText,
   Books,
@@ -8,10 +8,8 @@ import {
   House,
   Moon,
   Plus,
-  SpeakerHigh,
   Sun,
   UserCircle,
-  X,
 } from "@phosphor-icons/react";
 import {
   dailyAlternatives,
@@ -25,17 +23,16 @@ import {
   topicOptions,
   typefaceOptions,
 } from "./data.js";
-import {
-  getDailyFeed,
-  loginWithPassword,
-  logout,
-  saveProfile,
-} from "./lib/api.js";
-import { dueCards, REVIEW_RATINGS, scheduleReview } from "@soda-reading/core";
+import { getDailyFeed, saveProfile } from "./lib/api.js";
+import { DEFAULT_LOCAL_PROFILE, normalizeProfile } from "./lib/profile.js";
+import { dueCards } from "@soda-reading/core";
 import { inspectAndParseFile } from "./lib/importers.js";
-import { listLocalDocuments, persistState, resolveAccountBase, saveLocalDocument, useStoredState, writeAccountState } from "./lib/storage.js";
+import { deleteLocalDocument, listLocalDocuments, migrateLocalAccount, persistState, replaceLocalDocuments, resolveAccountBase, saveLocalDocument, useStoredState, writeAccountState } from "./lib/storage.js";
 import { AdminApp } from "./AdminApp.jsx";
+import { DataManagement } from "./screens/DataManagement.jsx";
+import { PlacementScreen } from "./screens/PlacementScreen.jsx";
 import { ReaderScreen } from "./screens/ReaderScreen.jsx";
+import { VocabularyScreen } from "./screens/VocabularyScreen.jsx";
 import { articleWithBody, displayFeed } from "./lib/feed.js";
 import {
   applyReadingProgress,
@@ -46,7 +43,6 @@ import {
   resumeFromProgress,
   todayReadMinutes,
   uniqueArticles,
-  vocabSource,
 } from "./lib/study.js";
 
 const NAV_ITEMS = [
@@ -80,14 +76,6 @@ function useAccountState(username, bucket, fallback) {
   };
 
   return [value, update];
-}
-
-function speakEnglish(text) {
-  if (!text || !("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  window.speechSynthesis.speak(utterance);
 }
 
 function toggleTopic(topics, topic) {
@@ -129,34 +117,36 @@ export function App() {
 }
 
 function SodaApp() {
-  const [session, setSession] = usePersistentState("soda.session", null);
-  const [profile, setProfile] = usePersistentState("soda.profile", null);
-  const [syncState, setSyncState] = useState("本地开发模式");
+  const [profile, setProfile] = usePersistentState("soda.profile", DEFAULT_LOCAL_PROFILE);
+  const [accountName] = useState(() => migrateLocalAccount(profile));
+  const [syncState, setSyncState] = useState("本地个人模式");
   const [theme, setTheme] = usePersistentState("soda.theme", "day");
   const [readingPrefs, setReadingPrefs] = usePersistentState("soda.readingPrefs", defaultReadingPrefs);
-  const accountName = profile?.username || "";
   const [resume, setResume] = useAccountState(accountName, "resume", null);
   const [screen, setScreen] = useState("home");
   const [activeArticle, setActiveArticle] = useState(null);
+  const [placementOpen, setPlacementOpen] = useState(false);
+  const [placement, setPlacement] = useAccountState(accountName, "placement", null);
   const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives, fallback: true });
   const [documents, setDocuments] = useState([]);
   const [vocabulary, setVocabulary] = useAccountState(accountName, "vocabulary", EMPTY_LIST);
   const [highlights, setHighlights] = useAccountState(accountName, "highlights", EMPTY_LIST);
   const [progress, setProgress] = useAccountState(accountName, "progress", EMPTY_PROGRESS);
+  const [positions, setPositions] = useAccountState(accountName, "positions", EMPTY_PROGRESS);
+  const [articleFeedback, setArticleFeedback] = useAccountState(accountName, "articleFeedback", EMPTY_PROGRESS);
   const [readingDay, setReadingDay] = useAccountState(accountName, "readingDay", null);
-  const [loginHint, setLoginHint] = useState(null);
   const [readerFocus, setReaderFocus] = useState(null);
   const [vocabReviewing, setVocabReviewing] = useState(false);
-  const [vocabRevealed, setVocabRevealed] = useState(false);
+  const [reviewFilterId, setReviewFilterId] = useState(null);
   const [closedArticleId, setClosedArticleId] = useState("");
   const profileSaveRef = useRef(0);
 
   useEffect(() => {
+    setProfile((current) => normalizeProfile(current));
     listLocalDocuments().then(setDocuments).catch(() => setDocuments([]));
   }, []);
 
   useEffect(() => {
-    if (!profile) return;
     const shown = displayFeed(feed, profile, fallbackLibrary);
     const catalog = uniqueArticles([
       shown.primary,
@@ -170,25 +160,17 @@ function SodaApp() {
   }, [feed, profile, documents, progress, resume]);
 
   useEffect(() => {
-    if (!session?.accessToken) return undefined;
     let active = true;
-    getDailyFeed(session.accessToken, profile).then((next) => {
+    getDailyFeed(normalizeProfile(profile)).then((next) => {
       if (active) setFeed(next);
     }).catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [session?.accessToken]);
-
-  const authenticate = ({ session: nextSession, profile: nextProfile }) => {
-    setSession(nextSession);
-    setProfile(nextProfile);
-    setLoginHint(null);
-    setSyncState("本地开发模式");
-  };
+  }, []);
 
   const updateProfile = (next) => {
-    const value = typeof next === "function" ? next(profile) : next;
+    const value = normalizeProfile(typeof next === "function" ? next(profile) : next);
     const generation = profileSaveRef.current + 1;
     profileSaveRef.current = generation;
     setProfile(value);
@@ -196,11 +178,10 @@ function SodaApp() {
     saveProfile(value)
       .then(async (saved) => {
         if (!isCurrentSave(generation, profileSaveRef.current)) return;
-        const merged = { ...value, ...saved, onboarded: true };
+        const merged = normalizeProfile({ ...value, ...saved, onboarded: true });
         setProfile(merged);
         setSyncState("本地已保存");
-        if (!session?.accessToken) return;
-        const nextFeed = await getDailyFeed(session.accessToken, merged);
+        const nextFeed = await getDailyFeed(merged);
         if (!isCurrentSave(generation, profileSaveRef.current)) return;
         setFeed(nextFeed);
       })
@@ -219,21 +200,47 @@ function SodaApp() {
     ));
   };
 
-  if (!session) {
+  const removeDocument = async (id) => {
+    await deleteLocalDocument(id);
+    setDocuments((current) => current.filter((document) => document.id !== id));
+    setHighlights((current) => current.filter((item) => item.articleId !== id));
+    setProgress((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
+    setPositions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
+    setResume((current) => current?.id === id ? null : current);
+  };
+
+  const clearData = async (bucket) => {
+    if (bucket === "vocabulary") setVocabulary([]);
+    if (bucket === "highlights") setHighlights([]);
+    if (bucket === "documents") {
+      const ids = new Set(documents.map((document) => document.id));
+      await replaceLocalDocuments([]);
+      setDocuments([]);
+      setHighlights((current) => current.filter((item) => !ids.has(item.articleId)));
+      setProgress((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !ids.has(key))));
+      setPositions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !ids.has(key))));
+      setResume((current) => ids.has(current?.id) ? null : current);
+    }
+  };
+
+  if (placementOpen) {
     return (
-      <LoginScreen
-        initialUsername={loginHint?.username ?? ""}
-        notice={loginHint?.message ?? ""}
-        onAuthenticated={authenticate}
+      <PlacementScreen
+        onCancel={() => setPlacementOpen(false)}
+        onComplete={(result) => {
+          setPlacement({ ...result, completedAt: new Date().toISOString() });
+          updateProfile({ ...profile, level: result.level, onboarded: true });
+          setPlacementOpen(false);
+        }}
       />
     );
   }
+
   if (!profile?.onboarded) {
     return (
       <OnboardingScreen
-        onComplete={(next) => {
-          updateProfile({ ...next, onboarded: true, username: profile?.username, role: profile?.role });
-        }}
+        onComplete={(next) => updateProfile({ ...next, onboarded: true })}
+        onStart={() => setPlacementOpen(true)}
       />
     );
   }
@@ -255,11 +262,30 @@ function SodaApp() {
         highlights={highlights}
         onHighlightsChange={setHighlights}
         progress={progress[activeArticle.id] ?? 0}
+        position={positions[activeArticle.id]}
         focus={readerFocus}
         onFocusConsumed={() => setReaderFocus(null)}
-        onProgress={(value) => {
+        feedback={articleFeedback[activeArticle.id]?.feeling}
+        onFeedback={(feeling) => setArticleFeedback((current) => ({
+          ...current,
+          [activeArticle.id]: { feeling, updatedAt: new Date().toISOString() },
+        }))}
+        onReview={(articleId) => {
+          setReviewFilterId(articleId);
+          setActiveArticle(null);
+          setScreen("vocabulary");
+          setVocabReviewing(true);
+        }}
+        onAdjustLevel={(level) => updateProfile({ ...profile, level })}
+        onProgress={(value, location) => {
           const previous = progress[activeArticle.id] ?? 0;
           setProgress((current) => ({ ...current, [activeArticle.id]: value }));
+          if (location) {
+            setPositions((current) => ({
+              ...current,
+              [activeArticle.id]: { ...location, progress: value, updatedAt: new Date().toISOString() },
+            }));
+          }
           setReadingDay((log) => applyReadingProgress(log, activeArticle, previous, value));
           setResume((current) => current ? { ...current, progress: value } : current);
         }}
@@ -291,6 +317,7 @@ function SodaApp() {
     ...fallbackLibrary,
     ...documents,
   ]);
+  const dueReviewCount = dueCards(vocabulary, profile.reviewLimit ?? 20).length;
   return (
     <div className={`responsive-app app-shell theme-${theme}`}>
       <DesktopNavigation current={screen} onChange={setScreen} profile={profile} readMinutes={readMinutes} />
@@ -303,6 +330,12 @@ function SodaApp() {
             onOpen={openArticle}
             onLevelChange={(level) => updateProfile({ ...profile, level })}
             closedArticleId={closedArticleId}
+            reviewCount={dueReviewCount}
+            onReview={() => {
+              setReviewFilterId(null);
+              setScreen("vocabulary");
+              setVocabReviewing(true);
+            }}
           />
         )}
         {screen === "library" && (
@@ -324,9 +357,10 @@ function SodaApp() {
             onReview={reviewVocabulary}
             onOpen={openArticle}
             reviewing={vocabReviewing}
-            revealed={vocabRevealed}
             onReviewingChange={setVocabReviewing}
-            onRevealedChange={setVocabRevealed}
+            sessionItems={reviewFilterId ? vocabulary.filter((item) => (item.contentId ?? item.contentHash) === reviewFilterId) : vocabulary}
+            reviewFilterId={reviewFilterId}
+            onClearReviewFilter={() => setReviewFilterId(null)}
           />
         )}
         {screen === "profile" && (
@@ -339,11 +373,13 @@ function SodaApp() {
             onReadingPrefsChange={setReadingPrefs}
             syncState={syncState}
             readMinutes={readMinutes}
-            onLogout={async () => {
-              await logout();
-              setSession(null);
-              setProfile(null);
-            }}
+            documents={documents}
+            vocabularyCount={vocabulary.length}
+            highlightCount={highlights.length}
+            onDeleteDocument={removeDocument}
+            onClearData={clearData}
+            placement={placement}
+            onStartPlacement={() => setPlacementOpen(true)}
           />
         )}
       </main>
@@ -360,54 +396,7 @@ function SodaApp() {
   );
 }
 
-function LoginScreen({ onAuthenticated, initialUsername = "", notice = "" }) {
-  const [username, setUsername] = useState(initialUsername);
-  const [password, setPassword] = useState("");
-  const [status, setStatus] = useState({ loading: false, error: "" });
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setStatus({ loading: true, error: "" });
-    try {
-      onAuthenticated(await loginWithPassword(username, password));
-    } catch (error) {
-      setStatus({ loading: false, error: error.message });
-    }
-  };
-
-  return (
-    <div className="entry-shell auth-screen">
-      <div className="auth-brand">
-        <span className="brand-kicker">SODA READING</span>
-        <h1>苏打阅读</h1>
-        <p>读你真正感兴趣的内容，顺便把英语读得更好。</p>
-      </div>
-      <form className="auth-form" onSubmit={submit}>
-        <label htmlFor="username">用户名</label>
-        <input
-          id="username"
-          autoComplete="username"
-          value={username}
-          onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 24))}
-        />
-        <label htmlFor="password">密码</label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        {notice && <p className="form-notice">{notice}</p>}
-        {status.error && <p className="form-error">{status.error}</p>}
-        <button className="primary-button" type="submit" disabled={!username || !password || status.loading}>{status.loading ? "正在登录…" : "登录并开始阅读"}</button>
-      </form>
-      {import.meta.env.DEV && <p className="demo-code">本地预览账号写在 .env 的 VITE_LOCAL_ADMIN_USERNAME 与 VITE_LOCAL_ADMIN_PASSWORD。</p>}
-    </div>
-  );
-}
-
-function OnboardingScreen({ onComplete }) {
+function OnboardingScreen({ onComplete, onStart }) {
   const [level, setLevel] = useState("B1");
   const [topics, setTopics] = useState(["科技", "文化"]);
   const [minutes, setMinutes] = useState(10);
@@ -440,11 +429,13 @@ function OnboardingScreen({ onComplete }) {
         <label>每日目标<select value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="20">20 分钟</option></select></label>
       </section>
       <button className="primary-button setup-submit" onClick={() => onComplete({ onboarded: true, level, topics, minutes })}>保存并查看今日文章</button>
+      <button className="text-button setup-submit" onClick={onStart}>先测一测我的水平</button>
+      <button className="text-button setup-submit" onClick={() => onComplete({ ...DEFAULT_LOCAL_PROFILE, onboarded: true })}>先按默认设置使用</button>
     </div>
   );
 }
 
-function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticleId }) {
+function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticleId, reviewCount = 0, onReview }) {
   const primary = feed.primary ?? demoArticle;
   const alternatives = feed.alternatives ?? [];
   const intro = primary.introZh || primary.summary;
@@ -475,6 +466,7 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticl
           <em>{remainingMinutes(resume, resume.progress)} 分钟</em>
         </button>
       )}
+      {reviewCount > 0 && <button type="button" className="review-today-link" onClick={onReview}>{reviewCount} 张生词待复习 <span>开始复习</span></button>}
       <article className="featured-reading">
         <div className="article-meta"><span>{primary.topic}</span><span>{primary.cefr} · {remainingMinutes(primary, featuredProgress)} 分钟</span></div>
         <h2>{primary.title}</h2>
@@ -582,120 +574,7 @@ function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChan
   );
 }
 
-function VocabularyScreen({
-  items,
-  catalog = [],
-  reviewLimit,
-  onChange,
-  onReview,
-  onOpen,
-  reviewing,
-  revealed,
-  onReviewingChange,
-  onRevealedChange,
-}) {
-  const queue = useMemo(() => dueCards(items, reviewLimit), [items, reviewLimit]);
-  const current = queue[0];
-  const currentSource = vocabSource(catalog, current);
-
-  useEffect(() => {
-    if (reviewing && !current) {
-      onReviewingChange(false);
-      onRevealedChange(false);
-    }
-  }, [reviewing, current, onReviewingChange, onRevealedChange]);
-
-  const speak = (word) => {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(word);
-    utterance.lang = "en-US";
-    window.speechSynthesis.speak(utterance);
-  };
-
-  const rate = (rating) => {
-    if (!current) return;
-    const outcome = scheduleReview(current.card, rating);
-    onReview(current, rating, outcome.after);
-    onRevealedChange(false);
-  };
-
-  if (reviewing && current) {
-    return (
-      <section className="screen vocabulary-screen review-session">
-        <header className="screen-header">
-          <div><span className="eyebrow">REVIEW</span><h1>今日复习</h1></div>
-          <button className="text-button" onClick={() => { onReviewingChange(false); onRevealedChange(false); }}>退出</button>
-        </header>
-        <div className="review-progress-line"><span>本轮还剩 {queue.length} 张</span><span>每日上限 {reviewLimit}</span></div>
-        <article className="review-card">
-          <button className="pronounce-button" onClick={() => speak(current.word)} aria-label={`朗读 ${current.word}`}><SpeakerHigh size={21} /></button>
-          <strong>{current.word}</strong>
-          <p>{current.sentence}</p>
-          {!revealed ? (
-            <button className="primary-button" onClick={() => onRevealedChange(true)}>显示语境词义</button>
-          ) : (
-            <>
-              <div className="review-answer"><span>{current.phonetic}</span><em>{glossText(current)}</em></div>
-              <div className="review-ratings">
-                {REVIEW_RATINGS.map((rating) => (
-                  <button key={rating.id} onClick={() => rate(rating.id)} className={`rating-${rating.key}`}>{rating.label}</button>
-                ))}
-              </div>
-              {currentSource && (
-                <button
-                  type="button"
-                  className="source-link"
-                  onClick={() => onOpen(currentSource, { word: current.word, sentence: current.sentence })}
-                >
-                  原文
-                </button>
-              )}
-            </>
-          )}
-        </article>
-      </section>
-    );
-  }
-
-  return (
-    <section className="screen vocabulary-screen">
-      <header className="screen-header"><div><span className="eyebrow">WORDS</span><h1>生词本</h1></div><span className="count-label">{items.length}</span></header>
-      {items.length > 0 && (
-        <div className="review-entry">
-          <div><strong>{queue.length} 张待复习</strong></div>
-          <button onClick={() => { onReviewingChange(true); onRevealedChange(false); }} disabled={!queue.length}>{queue.length ? "开始复习" : "今天已完成"}</button>
-        </div>
-      )}
-      {items.length === 0 ? (
-        <div className="empty-state"><BookmarkSimple size={42} weight="thin" /><h3>还没有生词</h3></div>
-      ) : (
-        <div className="word-list">
-          {items.map((item) => {
-            const source = vocabSource(catalog, item);
-            return (
-            <article className="saved-word" key={item.id}>
-              <button aria-label={`删除 ${item.word}`} onClick={() => onChange(items.filter((entry) => entry.id !== item.id))}><X size={18} /></button>
-              <strong>{item.word}</strong><span>{item.phonetic}</span><em>{glossText(item)}</em><p>{item.sentence}</p>
-              {source && (
-                <button
-                  type="button"
-                  className="source-link"
-                  onClick={() => onOpen(source, { word: item.word, sentence: item.sentence })}
-                >
-                  原文
-                </button>
-              )}
-            </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, readingPrefs, onReadingPrefsChange, syncState, readMinutes = 0, onLogout }) {
+function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, readingPrefs, onReadingPrefsChange, syncState, readMinutes = 0, documents, vocabularyCount, highlightCount, onDeleteDocument, onClearData, placement, onStartPlacement }) {
   const prefs = { ...defaultReadingPrefs, ...readingPrefs };
   return (
     <section className="screen profile-screen">
@@ -713,6 +592,10 @@ function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, reading
             {option.id}<small>{option.label}</small>
           </button>
         ))}
+      </div>
+      <div className="placement-settings">
+        <button type="button" className="text-button" onClick={onStartPlacement}>{placement ? "重新测试水平" : "测一测我的水平"}</button>
+        {placement?.level && <small>上次估计 {placement.level}，仅供参考</small>}
       </div>
       <div className="choice-chips profile-topics">
         {topicOptions.map((topic) => (
@@ -773,8 +656,14 @@ function ProfileScreen({ profile, onProfileChange, theme, onThemeChange, reading
       </div>
 
       <div className="sync-state"><span className={syncState.includes("已") ? "online" : ""} />{syncState}</div>
-      {(profile.role === "admin" || profile.username === "admin") && <a className="admin-link" href="/admin">管理台</a>}
-      <button className="logout-button" onClick={onLogout}>退出登录</button>
+      <p className="today-read">无需账号。生词、进度和导入书籍仅保存在此浏览器。</p>
+      <DataManagement
+        documents={documents}
+        vocabularyCount={vocabularyCount}
+        highlightCount={highlightCount}
+        onDeleteDocument={onDeleteDocument}
+        onClearData={onClearData}
+      />
     </section>
   );
 }

@@ -1,5 +1,6 @@
 import { vocabularyItemId } from "@soda-reading/core";
 import { measureOptions } from "../data.js";
+import { withChapterKey } from "./readingPosition.js";
 import {
   annotateTokens,
   flattenSentences,
@@ -277,6 +278,14 @@ export function collectFindHits(paragraphs, needle) {
   return matches;
 }
 
+export function collectChapterFindHits(chapters, needle) {
+  return (chapters ?? []).flatMap((chapter) =>
+    collectFindHits(chapter.paragraphs, needle).map((hit) =>
+      hit.map((key) => withChapterKey(key, chapter.id))
+    )
+  );
+}
+
 export async function copyText(value) {
   const text = String(value ?? "");
   if (!text) return false;
@@ -325,18 +334,18 @@ export function uniqueArticles(items = []) {
 
 export function vocabSource(catalog = [], item) {
   if (!item) return null;
-  return catalog.find((article) =>
-    article.id === item.contentId
-    || article.id === item.contentHash
-    || article.contentHash === item.contentId
-    || article.contentHash === item.contentHash
-  ) || null;
+  const ids = new Set([item.contentId, item.contentHash].filter((value) => typeof value === "string" && value));
+  if (!ids.size) return null;
+  return catalog.find((article) => ids.has(article?.id) || (article?.contentHash && ids.has(article.contentHash))) || null;
 }
 
-export function locateWordInArticle(paragraphs, { word, sentence } = {}) {
+export function locateWordInArticle(paragraphs, { word, sentence } = {}, chapterId = "") {
   const needle = normalizeWord(word);
   if (!needle) return null;
-  const spoken = flattenSentences(paragraphs);
+  const spoken = flattenSentences(paragraphs).map((item) => ({
+    ...item,
+    key: chapterId ? withChapterKey(item.key, chapterId) : item.key,
+  }));
   const normalizedSentence = String(sentence || "").replace(/\s+/g, " ").trim();
   const match = spoken.find((item) => item.text === normalizedSentence)
     || spoken.find((item) => normalizedSentence && item.text.includes(normalizedSentence.slice(0, 28)))
@@ -374,4 +383,14 @@ export function wordContextAt(paragraphs, located) {
     keys: located.wordKey ? [located.wordKey] : [],
     sentenceKey: located.sentenceKey,
   };
+}
+
+
+export function locateWordInChapters(chapters, focus, preferredChapterId = "") {
+  const ordered = [...(chapters ?? [])].sort((left, right) => Number(right.id === preferredChapterId) - Number(left.id === preferredChapterId));
+  for (const chapter of ordered) {
+    const located = locateWordInArticle(chapter.paragraphs, focus, chapter.id);
+    if (located) return { ...located, chapterId: chapter.id };
+  }
+  return null;
 }

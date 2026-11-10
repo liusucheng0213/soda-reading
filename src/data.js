@@ -10,10 +10,12 @@ export {
 export const topicOptions = ["科技", "文化", "商业", "自然", "健康", "历史"];
 
 export const levelOptions = [
+  { id: "A1", label: "入门", description: "从最基础的词句和短文开始" },
   { id: "A2", label: "初级", description: "短句、日常词，适合刚开始读完整短文" },
   { id: "B1", label: "中级", description: "能读常见故事与清楚的观点" },
   { id: "B2", label: "中高级", description: "能读稍长的解释与专业话题" },
   { id: "C1", label: "高级", description: "复杂长句与抽象观点" },
+  { id: "C2", label: "精通", description: "原版长文、隐含立场与细致表达" },
 ];
 
 export const typefaceOptions = [

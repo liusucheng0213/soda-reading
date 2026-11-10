@@ -133,7 +133,7 @@ ALTERNATIVES = [
 
 FALLBACK_LIBRARY = [PRIMARY_ARTICLE, *ALTERNATIVES]
 
-LEVEL_ORDER = {"A2": 0, "B1": 1, "B2": 2, "C1": 3}
+LEVEL_ORDER = {"A1": 0, "A2": 1, "B1": 2, "B2": 3, "C1": 4, "C2": 5}
 
 
 def recommendation_score(article: dict, preferences: dict, diversity: float = 1) -> float:
