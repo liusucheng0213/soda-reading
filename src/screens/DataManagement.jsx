@@ -102,7 +102,7 @@ export function DataManagement({ documents, vocabularyCount, highlightCount, onD
       <dialog ref={dialogRef} className="data-confirm" aria-labelledby="data-confirm-title">
         <h3 id="data-confirm-title">{pending?.title}</h3>
         {pending?.kind === "restore" && (
-          <p>备份含 {pending.summary.documents} 本书、{pending.summary.vocabulary} 个生词、{pending.summary.highlights} 条划线。恢复会覆盖当前个人数据，失败时会尝试回滚。</p>
+          <p>备份含 {pending.summary.documents} 本书、{pending.summary.vocabulary} 个生词（其中 {pending.summary.mastered} 个已掌握）、{pending.summary.highlights} 条划线。恢复会覆盖当前个人数据，失败时会尝试回滚。</p>
         )}
         {pending?.kind === "document" && <p>将删除书籍、阅读位置和该书划线；收藏的生词会保留，但不能再打开原文。</p>}
         {pending?.kind === "clear" && <p>{pending.bucket === "documents" ? "将删除所有导入书及其位置和划线，生词保留。" : "此操作无法撤销，建议先导出备份。"}</p>}

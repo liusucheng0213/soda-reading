@@ -25,7 +25,8 @@ import {
   typefaceOptions,
 } from "../data.js";
 import { peekWordTranslation, translateSentence, translateWord } from "../lib/api.js";
-import { isSameVocabularyItem, newReviewCard, normalizeChapters, vocabularyItemId } from "@soda-reading/core";
+import { isSameVocabularyItem, normalizeChapters, vocabularyItemId } from "@soda-reading/core";
+import { upsertVocabularyItem } from "../lib/vocabulary.js";
 import {
   annotateTokens,
   flattenSentences,
@@ -239,6 +240,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     ? savedPosition.chapterProgress
     : Number(savedPosition.chapterOffsets?.[activeChapterId]) || 0;
   const [selectedWord, setSelectedWord] = useState(null);
+  const [wordMode, setWordMode] = useState("translate");
   const [selectedSentence, setSelectedSentence] = useState(null);
   const [sentenceResult, setSentenceResult] = useState(null);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -267,6 +269,8 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
   const articleIdRef = useRef(article.id);
   const restoreChapterRef = useRef(activeChapterId);
   const wordRequestRef = useRef(null);
+  const wordModeRef = useRef("translate");
+  wordModeRef.current = wordMode;
   const sentenceRequestRef = useRef(null);
   const ignoreClickRef = useRef(false);
   const pickRef = useRef(null);
@@ -557,6 +561,27 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     if (next > progress) reportProgress(next, chapterProgress);
   }, [listenIndex, listening, spoken.length, progress, activeChapterId]);
 
+  const saveWordResult = (selection, result) => {
+    if (!selection?.word || !result) return;
+    const candidate = {
+      id: vocabularyItemId(article.id, selection.word, selection.sentence),
+      contentHash: article.contentHash ?? article.id,
+      contentId: article.id,
+      chapterId: selection.chapterId ?? activeChapterId,
+      word: selection.word,
+      sentence: selection.sentence,
+      before: selection.before,
+      after: selection.after,
+      ...result,
+    };
+    onVocabularyChange((current) => upsertVocabularyItem(current, candidate));
+  };
+
+  const completeWordRequest = (selection, result) => {
+    setSelectedWord({ ...selection, status: "success", result, error: "" });
+    if (wordModeRef.current === "vocabulary") saveWordResult(selection, result);
+  };
+
   const requestWord = async (context) => {
     wordRequestRef.current?.abort();
     const controller = new AbortController();
@@ -568,26 +593,21 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     const normalized = query.includes(" ") ? query.toLowerCase() : normalizeWord(query);
     const remembered = vocabMatch(vocabulary, query, context.sentence, { exact: true });
     if (remembered?.translation) {
-      setSelectedWord({
-        ...next,
-        status: "success",
-        error: "",
-        result: {
-          scope: "word",
-          quality: remembered.quality || "contextual",
-          translation: remembered.translation,
-          commonTranslation: remembered.commonTranslation,
-          referent: remembered.referent,
-          lemma: remembered.lemma ?? "",
-          partOfSpeech: remembered.partOfSpeech ?? "",
-          phonetic: remembered.phonetic ?? "",
-          provider: remembered.provider || "vocabulary",
-          model: remembered.model || "saved",
-          cached: true,
-          cacheLayer: "vocabulary",
-          latencyMs: 0,
-          providerLatencyMs: 0,
-        },
+      completeWordRequest(next, {
+        scope: "word",
+        quality: remembered.quality || "contextual",
+        translation: remembered.translation,
+        commonTranslation: remembered.commonTranslation,
+        referent: remembered.referent,
+        lemma: remembered.lemma ?? "",
+        partOfSpeech: remembered.partOfSpeech ?? "",
+        phonetic: remembered.phonetic ?? "",
+        provider: remembered.provider || "vocabulary",
+        model: remembered.model || "saved",
+        cached: true,
+        cacheLayer: "vocabulary",
+        latencyMs: 0,
+        providerLatencyMs: 0,
       });
       return;
     }
@@ -596,20 +616,21 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       (!item.sentence || item.sentence === context.sentence)
     );
     if (prepared?.translation) {
-      setSelectedWord({ ...next, status: "success", error: "", result: {
-          scope: "word",
-          quality: "contextual",
-          translation: prepared.translation,
-          lemma: prepared.lemma ?? "",
-          partOfSpeech: prepared.partOfSpeech ?? "",
-          phonetic: prepared.phonetic ?? "",
-          provider: "soda-pregenerated",
-          model: "article-edition",
-          cached: true,
-          cacheLayer: "article",
-          latencyMs: 0,
-          providerLatencyMs: 0,
-        },
+      completeWordRequest(next, {
+        scope: "word",
+        quality: "contextual",
+        translation: prepared.translation,
+        commonTranslation: prepared.commonTranslation,
+        referent: prepared.referent,
+        lemma: prepared.lemma ?? "",
+        partOfSpeech: prepared.partOfSpeech ?? "",
+        phonetic: prepared.phonetic ?? "",
+        provider: "soda-pregenerated",
+        model: "article-edition",
+        cached: true,
+        cacheLayer: "article",
+        latencyMs: 0,
+        providerLatencyMs: 0,
       });
       return;
     }
@@ -619,7 +640,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
       contentHash: article.contentHash ?? article.id,
     });
     if (peeked?.translation) {
-      setSelectedWord({ ...next, status: "success", error: "", result: peeked });
+      completeWordRequest(next, peeked);
       return;
     }
     const preview = !query.includes(" ") ? contextualDictionary[normalized] : null;
@@ -651,7 +672,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
         signal: controller.signal,
       });
       if (wordRequestRef.current !== controller) return;
-      setSelectedWord({ ...next, status: "success", result, error: "" });
+      completeWordRequest(next, result);
     } catch (error) {
       if (error?.name === "AbortError" || wordRequestRef.current !== controller) return;
       setSelectedWord((current) => keepShownGloss(current, {
@@ -671,6 +692,11 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
     const keys = context.keys ?? [context.key];
     const already = selectedWord?.keys?.length === keys.length && selectedWord.keys.every((key, index) => key === keys[index]);
     if (already) {
+      if (wordMode === "vocabulary") {
+        if (selectedWord.status === "success") saveWordResult(selectedWord, selectedWord.result);
+        if (selectedWord.status === "error") requestWord(selectedWord);
+        return;
+      }
       wordRequestRef.current?.abort();
       setSelectedWord(null);
       return;
@@ -737,20 +763,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
 
   const saveSelectedWord = () => {
     if (!selectedWord?.result) return;
-    const id = vocabularyItemId(article.id, selectedWord.word, selectedWord.sentence);
-    if (vocabulary.some((entry) => isSameVocabularyItem(entry, article.id, selectedWord.word, selectedWord.sentence))) return;
-    onVocabularyChange([...vocabulary, {
-      id,
-      contentHash: article.contentHash ?? article.id,
-      contentId: article.id,
-      chapterId: activeChapterId,
-      word: selectedWord.word,
-      sentence: selectedWord.sentence,
-      before: selectedWord.before,
-      after: selectedWord.after,
-      card: newReviewCard(),
-      ...selectedWord.result,
-    }]);
+    saveWordResult(selectedWord, selectedWord.result);
   };
 
   const sameSelectedHighlight = (item) => {
@@ -1085,6 +1098,14 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             }}
             aria-label="查找"
           ><MagnifyingGlass size={22} /></button>
+          <button
+            type="button"
+            className="reader-icon reader-vocabulary-mode"
+            onClick={() => setWordMode((value) => value === "vocabulary" ? "translate" : "vocabulary")}
+            aria-label="生词标记"
+            aria-pressed={wordMode === "vocabulary"}
+            title={wordMode === "vocabulary" ? "关闭生词标记，恢复普通点词" : "开启后，点击单词或短语即保存到生词库"}
+          ><BookmarkSimple size={17} /><span>生词</span></button>
           <button className="reader-icon" onClick={() => onThemeChange(theme === "night" ? "day" : theme === "sepia" ? "night" : "sepia")} aria-label="切换纸色">{theme === "night" ? <Moon size={22} /> : <Sun size={22} />}</button>
           <button
             className="reader-icon"

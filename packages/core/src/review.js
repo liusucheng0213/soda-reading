@@ -64,18 +64,47 @@ export function serializeCard(card) {
   };
 }
 
+export function vocabularyState(item) {
+  return item?.learningState === "mastered" ? "mastered" : "learning";
+}
+
+export function learningVocabulary(items) {
+  return (items || []).filter((item) => vocabularyState(item) === "learning");
+}
+
+export function masteredVocabulary(items) {
+  return (items || []).filter((item) => vocabularyState(item) === "mastered");
+}
+
+export function setVocabularyLearningState(item, state, now = new Date()) {
+  if (state !== "learning" && state !== "mastered") {
+    throw new Error(`不支持的生词状态：${state}`);
+  }
+  const card = item.card ? cardFromRow(item.card) : newReviewCard(now);
+  if (state === "learning") card.due = now;
+  return {
+    ...item,
+    learningState: state,
+    masteredAt: state === "mastered" ? now.toISOString() : null,
+    card: serializeCard(card),
+  };
+}
+
 function dueTime(item) {
   if (!item?.card?.due) return 0;
   const time = new Date(item.card.due).getTime();
   return Number.isFinite(time) ? time : 0;
 }
 
+export function dueVocabulary(items, now = new Date()) {
+  return learningVocabulary(items)
+    .filter((item) => dueTime(item) <= now.getTime())
+    .sort((left, right) => dueTime(left) - dueTime(right));
+}
+
 export function dueCards(items, limit = 20, now = new Date()) {
   const limitCount = Math.max(10, Math.min(50, Number(limit) || 20));
-  return [...(items || [])]
-    .filter((item) => dueTime(item) <= now.getTime())
-    .sort((left, right) => dueTime(left) - dueTime(right))
-    .slice(0, limitCount);
+  return dueVocabulary(items, now).slice(0, limitCount);
 }
 
 export function startReviewSession(items, limit = 20, now = new Date()) {
@@ -91,26 +120,50 @@ export function currentReviewItem(session) {
 }
 
 export function rateSessionCard(session, rating, now = new Date()) {
-  const item = currentReviewItem(session);
-  if (!item) return { session, item: null, after: null, log: null };
-  const outcome = scheduleReview(item.card, rating, now);
-  const previous = {
-    queue: [...session.queue],
-    completed: session.completed,
-  };
+  const beforeItem = currentReviewItem(session);
+  if (!beforeItem) return { session, item: null, beforeItem: null, afterItem: null, log: null };
+  const outcome = scheduleReview(beforeItem.card, rating, now);
+  const afterItem = { ...beforeItem, card: outcome.after };
   const remaining = session.queue.slice(1);
   if (rating === Rating.Again) {
     const insertAt = Math.min(3, remaining.length);
-    remaining.splice(insertAt, 0, { ...item, card: outcome.after });
+    remaining.splice(insertAt, 0, afterItem);
   }
   return {
-    ...outcome,
-    item,
+    item: beforeItem,
+    beforeItem,
+    afterItem,
+    log: outcome.log,
     session: {
       ...session,
       queue: remaining,
       completed: session.completed + (rating === Rating.Again ? 0 : 1),
-      history: [...session.history, { ...previous, item, before: outcome.before }],
+      history: [...session.history, {
+        queue: [...session.queue],
+        completed: session.completed,
+        beforeItem,
+      }],
+    },
+  };
+}
+
+export function masterSessionCard(session, now = new Date()) {
+  const beforeItem = currentReviewItem(session);
+  if (!beforeItem) return { session, item: null, beforeItem: null, afterItem: null };
+  const afterItem = setVocabularyLearningState(beforeItem, "mastered", now);
+  return {
+    item: beforeItem,
+    beforeItem,
+    afterItem,
+    session: {
+      ...session,
+      queue: session.queue.slice(1),
+      completed: session.completed + 1,
+      history: [...session.history, {
+        queue: [...session.queue],
+        completed: session.completed,
+        beforeItem,
+      }],
     },
   };
 }
@@ -125,7 +178,7 @@ export function undoReviewSession(session) {
       completed: previous.completed,
       history: session.history.slice(0, -1),
     },
-    item: previous.item,
-    before: previous.before,
+    item: previous.beforeItem,
+    beforeItem: previous.beforeItem,
   };
 }

@@ -194,9 +194,9 @@ function SodaApp() {
     setVocabulary(next);
   };
 
-  const reviewVocabulary = (item, _rating, after) => {
+  const reviewVocabulary = (item, _rating, afterItem) => {
     setVocabulary((current) => current.map((entry) =>
-      entry.id === item.id ? { ...entry, card: after } : entry
+      entry.id === item.id ? afterItem : entry
     ));
   };
 

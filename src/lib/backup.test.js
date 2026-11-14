@@ -17,7 +17,7 @@ function input() {
     theme: "sepia",
     buckets: {
       resume: null,
-      vocabulary: [{ id: "word-1", contentId: "book-1", word: "shade", sentence: "Trees make shade.", translation: "树荫", card: { due: "2026-11-10T00:00:00.000Z", reps: 1 } }],
+      vocabulary: [{ id: "word-1", contentId: "book-1", word: "shade", sentence: "Trees make shade.", translation: "树荫", learningState: "learning", masteredAt: null, card: { due: "2026-11-10T00:00:00.000Z", reps: 1 } }],
       highlights: [],
       progress: { "book-1": 0.25 },
       readingDay: null,
@@ -33,7 +33,8 @@ function input() {
 describe("local backup", () => {
   it("contains personal learning data and books without sessions or secrets", () => {
     const backup = buildBackup(input());
-    expect(backup.schemaVersion).toBe(1);
+    expect(backup.schemaVersion).toBe(2);
+    expect(backup.buckets.vocabulary[0]).toMatchObject({ learningState: "learning", masteredAt: null });
     expect(backup.buckets.positions["book-1"].chapterId).toBe("chapter-0001");
     expect(backup.buckets.articleFeedback["book-1"].feeling).toBe("right");
     expect(backup.documents).toEqual(documents);
@@ -41,15 +42,100 @@ describe("local backup", () => {
     expect(JSON.stringify(backup)).not.toContain("must-not-be-exported");
   });
 
+  it("writes explicit lifecycle defaults into every exported word", () => {
+    const value = input();
+    delete value.buckets.vocabulary[0].learningState;
+    delete value.buckets.vocabulary[0].masteredAt;
+    const backup = buildBackup(value);
+    expect(backup.schemaVersion).toBe(2);
+    expect(backup.buckets.vocabulary[0]).toMatchObject({ learningState: "learning", masteredAt: null });
+  });
+
+  it("rejects a referent label instead of a visible translation", () => {
+    const value = input();
+    delete value.buckets.vocabulary[0].translation;
+    value.buckets.vocabulary[0].referent = "前文提到的树木";
+    expect(() => parseBackup(JSON.stringify(buildBackup(value)))).toThrow("生词");
+  });
+
+  it("accepts a valid referent marker with a non-empty translation", () => {
+    const value = input();
+    value.buckets.vocabulary[0].translation = "指代前文的树木";
+    value.buckets.vocabulary[0].referent = true;
+    const { backup } = parseBackup(JSON.stringify(buildBackup(value)));
+    expect(backup.buckets.vocabulary[0]).toMatchObject({ translation: "指代前文的树木", referent: true });
+  });
+
+  it.each(["", "   "])("rejects a blank translation", (translation) => {
+    const backup = buildBackup(input());
+    backup.buckets.vocabulary[0].translation = translation;
+    expect(() => parseBackup(JSON.stringify(backup))).toThrow("生词");
+  });
+
+  it("rejects a non-boolean referent marker", () => {
+    const backup = buildBackup(input());
+    backup.buckets.vocabulary[0].referent = "前文提到的树木";
+    expect(() => parseBackup(JSON.stringify(backup))).toThrow("指代");
+  });
+
   it("validates before reporting a restore summary", () => {
     const { backup, summary } = parseBackup(JSON.stringify(buildBackup(input())));
     expect(backup.profile.level).toBe("B1");
-    expect(summary).toEqual({ documents: 1, vocabulary: 1, highlights: 0 });
+    expect(summary).toEqual({ documents: 1, vocabulary: 1, mastered: 0, highlights: 0 });
+  });
+
+  it("rejects a complete unsupported-version backup instead of migrating it", () => {
+    const backup = buildBackup(input());
+    backup.schemaVersion = 1;
+    expect(() => parseBackup(JSON.stringify(backup))).toThrow("不支持");
+  });
+
+  it("counts mastered words separately in a valid restore preview", () => {
+    const value = input();
+    value.buckets.vocabulary.push({
+      ...value.buckets.vocabulary[0],
+      id: "word-2",
+      learningState: "mastered",
+      masteredAt: "2026-11-12T00:00:00.000Z",
+    });
+    const { backup, summary } = parseBackup(JSON.stringify(buildBackup(value)));
+    expect(backup.buckets.vocabulary[1].learningState).toBe("mastered");
+    expect(summary).toMatchObject({ vocabulary: 2, mastered: 1 });
+  });
+
+  it.each([
+    [{ learningState: undefined }, "生词状态"],
+    [{ learningState: "finished" }, "生词状态"],
+    [{ masteredAt: undefined }, "掌握时间"],
+    [{ learningState: "mastered", masteredAt: "not-a-date" }, "掌握时间"],
+    [{ learningState: "mastered", masteredAt: null }, "掌握时间"],
+    [{ learningState: "learning", masteredAt: "2026-11-12T00:00:00.000Z" }, "掌握时间"],
+  ])("rejects inconsistent vocabulary lifecycle fields", (patch, message) => {
+    const backup = buildBackup(input());
+    Object.assign(backup.buckets.vocabulary[0], patch);
+    expect(() => parseBackup(JSON.stringify(backup))).toThrow(message);
+  });
+
+  it("rejects an invalid card due date", () => {
+    const backup = buildBackup(input());
+    backup.buckets.vocabulary[0].card.due = "not-a-date";
+    expect(() => parseBackup(JSON.stringify(backup))).toThrow("复习卡片");
+  });
+
+  it("rejects invalid mastery state before snapshotting current data", async () => {
+    const backup = buildBackup(input());
+    backup.buckets.vocabulary[0].learningState = "finished";
+    let called = false;
+    await expect(restoreLocalData(backup, {
+      snapshot: async () => { called = true; },
+      restore: async () => {},
+    })).rejects.toThrow("生词状态");
+    expect(called).toBe(false);
   });
 
   it.each([
     ["not json", "不是有效的 JSON"],
-    [JSON.stringify({ schemaVersion: 2 }), "不支持"],
+    [JSON.stringify({ schemaVersion: 1 }), "不支持"],
     [JSON.stringify({ ...buildBackup(input()), documents: {} }), "书籍"],
     [JSON.stringify({ ...buildBackup(input()), buckets: [] }), "学习数据"],
   ])("rejects invalid input without restoring", (text, message) => {

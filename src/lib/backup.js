@@ -1,3 +1,4 @@
+import { masteredVocabulary, vocabularyState } from "@soda-reading/core";
 import {
   listLocalDocuments,
   persistState,
@@ -58,14 +59,27 @@ function validateDocument(document) {
 function validateVocabulary(items) {
   if (!Array.isArray(items)) throw new Error("备份中的生词无效");
   for (const item of items) {
-    if (!isRecord(item) || ["id", "word", "sentence", "translation"].some((field) => typeof item[field] !== "string")) {
+    if (!isRecord(item) || ["id", "word", "sentence"].some((field) => typeof item[field] !== "string")) {
       throw new Error("备份中的生词无效");
+    }
+    if (typeof item.translation !== "string" || !item.translation.trim()) {
+      throw new Error("备份中的生词无效");
+    }
+    if (typeof item.referent !== "undefined" && typeof item.referent !== "boolean") {
+      throw new Error("备份中的生词指代标记无效");
+    }
+    if (!["learning", "mastered"].includes(item.learningState)) throw new Error("备份中的生词状态无效");
+    const masteredAtValid = typeof item.masteredAt === "string" && !Number.isNaN(Date.parse(item.masteredAt));
+    if (item.learningState === "mastered" ? !masteredAtValid : item.masteredAt !== null) {
+      throw new Error("备份中的生词掌握时间无效");
     }
     for (const field of ["contentId", "contentHash", "chapterId"]) {
       if (item[field] != null && typeof item[field] !== "string") throw new Error("备份中的生词无效");
     }
     if (item.card != null) {
-      if (!isRecord(item.card) || typeof item.card.due !== "string") throw new Error("备份中的复习卡片无效");
+      if (!isRecord(item.card) || typeof item.card.due !== "string" || Number.isNaN(Date.parse(item.card.due))) {
+        throw new Error("备份中的复习卡片无效");
+      }
       for (const [field, value] of Object.entries(item.card)) {
         if (["reps", "lapses", "stability", "difficulty"].includes(field) && typeof value !== "number") {
           throw new Error("备份中的复习卡片无效");
@@ -117,12 +131,19 @@ function validateBuckets(buckets) {
 
 export function buildBackup({ profile, readingPrefs, theme, buckets, documents }) {
   return clone({
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt: new Date().toISOString(),
     profile,
     readingPrefs,
     theme,
-    buckets,
+    buckets: {
+      ...buckets,
+      vocabulary: (buckets.vocabulary ?? []).map((item) => ({
+        ...item,
+        learningState: vocabularyState(item),
+        masteredAt: item.masteredAt ?? null,
+      })),
+    },
     documents,
   });
 }
@@ -134,7 +155,7 @@ export function parseBackup(text) {
   } catch {
     throw new Error("备份文件不是有效的 JSON");
   }
-  if (!isRecord(backup) || backup.schemaVersion !== 1) throw new Error("不支持这个备份版本");
+  if (!isRecord(backup) || backup.schemaVersion !== 2) throw new Error("不支持这个备份版本");
   if (typeof backup.exportedAt !== "string" || Number.isNaN(Date.parse(backup.exportedAt))) throw new Error("备份日期无效");
   if (!isRecord(backup.profile) || typeof backup.profile.username !== "string" || !LEVELS.includes(backup.profile.level) || !validStringArray(backup.profile.topics) || typeof backup.profile.minutes !== "number" || typeof backup.profile.reviewLimit !== "number" || typeof backup.profile.onboarded !== "boolean") {
     throw new Error("备份中的个人设置无效");
@@ -155,6 +176,7 @@ export function parseBackup(text) {
     summary: {
       documents: backup.documents.length,
       vocabulary: backup.buckets.vocabulary.length,
+      mastered: masteredVocabulary(backup.buckets.vocabulary).length,
       highlights: backup.buckets.highlights.length,
     },
   };
