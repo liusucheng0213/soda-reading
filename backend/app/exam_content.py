@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .content_pipeline import split_reading_sentences
 
 
 EXAM_TRACKS = ("high_school", "cet4", "cet6", "postgraduate")
@@ -111,7 +112,7 @@ def validate_exam_passage(payload: dict) -> ExamPassage:
         if question.evidence_paragraph >= len(passage.paragraphs):
             raise ValueError(f"题目 {question.id} 的 evidenceParagraph 不存在")
         paragraph = passage.paragraphs[question.evidence_paragraph]
-        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", paragraph) if part.strip()]
+        sentences = split_reading_sentences(paragraph)
         if question.evidence_sentence not in sentences:
             raise ValueError(f"题目 {question.id} 的 evidenceSentence 不是对应段落的完整原句")
     return passage

@@ -262,3 +262,48 @@ def test_only_approved_exam_articles_appear_in_catalog(tmp_path):
     with database.session() as session:
         session.get(ArticleVariant, imported["id"]).review_status = "review"
     assert store.list() == []
+
+
+@pytest.mark.parametrize(("path", "value"), [
+    (("questions", 0, "answer"), "B"),
+    (("questions", 0, "explanationZh"), "修订后的解析不应被静默忽略。"),
+    (("questions", 0, "evidenceSentence"), "They also create opportunities to learn from one another."),
+    (("examTrack",), "cet6"),
+    (("cefr",), "C1"),
+    (("title",), "A Revised Title"),
+    (("contentOrigin",), "adapted"),
+])
+def test_same_id_rejects_any_unversioned_content_change(tmp_path, path, value):
+    store = ExamContentStore(exam_database(tmp_path))
+    store.import_passage(valid_passage())
+    original = store.list()[0]
+    changed = valid_passage()
+    target = changed
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    if changed["contentOrigin"] == "adapted":
+        changed["provenance"].update({
+            "sourceUrl": "https://example.org/revised",
+            "retrievedAt": "2026-11-15T10:00:00+08:00",
+            "license": "明确授权",
+            "usageBasis": "已核验改编使用依据",
+        })
+    with pytest.raises(ValueError, match="内容包"):
+        store.import_passage(changed)
+    assert store.list()[0] == original
+
+
+def test_evidence_handles_titles_and_rejects_multiple_sentences():
+    payload = valid_passage()
+    payload["paragraphs"][0] = "Mr. Bell opened the bakery. He smiled at the visitors."
+    for question in payload["questions"][1:]:
+        question["evidenceParagraph"] = 1
+        question["evidenceSentence"] = "A garden needs steady care, so members often divide tasks and share what they learn."
+    payload["questions"][0]["evidenceSentence"] = "Mr. Bell opened the bakery."
+    assert validate_exam_passage(payload).questions[0].evidence_sentence == "Mr. Bell opened the bakery."
+
+    payload["paragraphs"][0] = 'Eli paused: "Leave room for a question." No one explained it.'
+    payload["questions"][0]["evidenceSentence"] = payload["paragraphs"][0]
+    with pytest.raises(ValueError, match="q1"):
+        validate_exam_passage(payload)

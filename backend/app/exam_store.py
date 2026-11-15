@@ -30,6 +30,11 @@ class ExamContentStore:
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     @staticmethod
+    def _package_hash(passage: ExamPassage) -> str:
+        serialized = passage.model_dump_json(by_alias=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def _related_id(kind: str, passage_id: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"soda-reading:exam:{kind}:{passage_id}"))
 
@@ -39,6 +44,8 @@ class ExamContentStore:
         if existing:
             if existing.body_hash != body_hash:
                 raise ValueError(f"考试内容 {passage.id} 的 ID 相同但正文不同")
+            if (existing.exam_metadata or {}).get("contentHash") != self._package_hash(passage):
+                raise ValueError(f"考试内容 {passage.id} 的内容包不同，请使用新 ID 进行版本化修订")
             return existing, False
 
         source_id = f"exam-source-{hashlib.sha256(passage.provenance.source_id.encode('utf-8')).hexdigest()[:16]}"
@@ -132,6 +139,7 @@ class ExamContentStore:
                 "session": passage.session,
                 "region": passage.region,
                 "paper": passage.paper,
+                "contentHash": self._package_hash(passage),
             },
             questions=[question.model_dump(by_alias=True) for question in passage.questions],
             provenance=passage.provenance.model_dump(by_alias=True, mode="json"),

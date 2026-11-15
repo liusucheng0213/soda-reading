@@ -256,7 +256,8 @@ def split_reading_sentences(text: str) -> list[str]:
         lambda match: f"{match.group(1)}\u0001{match.group(2)}",
         protected,
     )
-    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", protected) if part.strip()]
+    separated = re.sub(r'([.!?][\"\'”’)\]]*)\s+', lambda match: match.group(1) + "\0", protected)
+    parts = [part.strip() for part in separated.split("\0") if part.strip()]
     return [part.replace("\u0001", ".") for part in parts] or ([text.strip()] if text and text.strip() else [])
 
 
