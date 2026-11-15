@@ -45,3 +45,21 @@ npm test
 npm run build:web
 npm run build:admin
 ```
+
+## 考试内容包
+
+首批内容位于 `backend/content/exams/*.json`，当前是 CET4、CET6、考研各一篇科普和一篇故事，共 6 篇、24 道四选一题，全部标为 `original / 原创模拟`，不包含真题。高中内容尚未导入。
+
+在 `backend/` 目录执行：
+
+```powershell
+$env:PYTHONPATH="."
+python scripts/import_exam_content.py content/exams
+```
+
+- 每篇包含稳定 `id`、正文、CEFR、独立 `examTrack`、`contentOrigin`、4 道题及完整 `provenance`。
+- 外部内容必须填写 HTTPS `sourceUrl`、`retrievedAt`、`license`、`usageBasis`、`sourceLabel/sourceId` 和核验时间；来源和使用依据由内容编辑核验。只有核验通过的 `official_exam / licensed_exam` 才能标“真题”，`adapted / original` 分别标“改编 / 原创模拟”。
+- 答案、中文解析和原文依据需由内容编辑逐题核对，并填写 `answersReviewedAt`。确定性校验负责结构、选项去重、题号唯一、答案范围和精确证据句定位，不宣称自动证明语义答案正确，也不为出题调用模型。
+- 任一文件无效时整批回滚。完全相同的包可幂等重导；同 ID 的正文、题目、来源或其他内容发生变化时必须使用新 ID，不能静默覆盖已有学习记录所指向的内容。
+- 阅读端通过免登录 `GET /exams/catalog?track=cet4|cet6|postgraduate` 获取目录；不传轨道返回三轨道内容。考试文章不进入普通 `/feed/daily`，考试 API 失败不影响普通馆藏和本地书籍。
+- 答题与解析揭示只存在当前组件会话，不保存成绩、不进入 FSRS 或个人备份；收藏生词仍复用现有文章 ID、章节和原句。
