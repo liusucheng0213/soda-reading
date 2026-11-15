@@ -42,6 +42,9 @@ backend/.pytest_cache/
 credentials.json
 secrets.json
 
+# Worktrees
+.worktrees/
+
 # Editors
 .idea/
 .vscode/
