@@ -75,6 +75,27 @@ body {
 .exam-filter { display: flex; gap: 4px; margin: 0 0 16px; overflow-x: auto; }
 .exam-filter button { flex: none; min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer; }
 .exam-filter button[aria-pressed="true"] { color: var(--mint-deep); border-bottom-color: var(--mint-deep); }
+.exam-practice { margin: 48px 0; padding-top: 28px; border-top: 1px solid var(--hairline); }
+.exam-practice-header h2 { margin: 6px 0; font-size: 28px; }
+.exam-practice-header p { margin: 0 0 28px; color: var(--text-muted); font-size: 14px; }
+.exam-question { min-width: 0; margin: 0 0 32px; padding: 0; border: 0; }
+.exam-question legend { width: 100%; margin-bottom: 14px; color: var(--text-main); font-size: 17px; font-weight: 600; line-height: 1.6; }
+.exam-question legend span { margin-right: 8px; color: var(--mint-deep); }
+.exam-option { display: flex; align-items: center; min-height: 48px; border-bottom: 1px solid var(--hairline); }
+.exam-option input { flex: none; width: 18px; height: 18px; margin: 0 12px 0 2px; accent-color: var(--mint-deep); }
+.exam-option input:focus-visible { outline: 2px solid var(--mint-deep); outline-offset: 3px; }
+.exam-option label { flex: 1; padding: 12px 0; font-size: 16px; line-height: 1.5; cursor: pointer; }
+.exam-option label span { margin-right: 8px; color: var(--text-muted); }
+.exam-check { min-height: 44px; margin-top: 16px; padding: 0 18px; border: 1px solid var(--hairline); background: transparent; color: var(--text-main); cursor: pointer; }
+.exam-check:disabled { cursor: not-allowed; opacity: 0.5; }
+.exam-check:focus-visible { outline: 2px solid var(--mint-deep); outline-offset: 3px; }
+.exam-result { margin-top: 20px; padding-left: 16px; border-left: 2px solid var(--mint-deep); }
+.exam-result > strong { color: var(--mint-deep); }
+.exam-result p { margin: 8px 0; line-height: 1.75; }
+.exam-explanation, .exam-evidence { margin-top: 16px; }
+.exam-explanation span, .exam-evidence span { color: var(--text-muted); font-size: 12px; }
+.exam-evidence { margin-inline: 0; padding: 0; }
+.exam-evidence p { font-family: "Newsreader", Georgia, serif; font-size: 18px; }
 .level-switcher { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--hairline); background: color-mix(in srgb, var(--surface-strong) 70%, transparent); }
 .level-switcher button { min-width: 44px; min-height: 36px; padding: 0 9px; border: 0; background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; }
 .level-switcher button.selected { background: var(--surface-strong); color: var(--mint-deep); }

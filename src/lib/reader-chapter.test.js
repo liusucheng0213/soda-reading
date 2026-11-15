@@ -61,6 +61,26 @@ describe("mounted chapter reader", () => {
     expect(document.querySelector(".reader-scroll").scrollTop).toBe(750);
   });
 
+  it("places exam practice at the end and labels track, CEFR, and origin", async () => {
+    const article = {
+      id: "exam-reader",
+      title: "Exam Reader",
+      cefr: "B1",
+      examTrack: "cet4",
+      contentOrigin: "original",
+      paragraphs: ["A complete sentence for reading practice."],
+      questions: [{
+        id: "q1", prompt: "What kind of sentence is it?", options: ["Complete", "Empty", "Broken", "Missing"],
+        answer: "A", explanationZh: "原句完整。", evidenceParagraph: 0,
+        evidenceSentence: "A complete sentence for reading practice.",
+      }],
+    };
+    await mount(article);
+    expect(document.querySelector(".reader-title-block").textContent).toContain("CET4 · B1 · 原创模拟");
+    expect(document.querySelector(".exam-practice")).not.toBeNull();
+    expect(document.querySelector(".exam-practice").nextElementSibling.classList.contains("reading-completion")).toBe(true);
+  });
+
   it("persists the next chapter before its first spoken sentence starts", async () => {
     const utterances = [];
     const synthesis = { speak: (utterance) => utterances.push(utterance), cancel: vi.fn(), speaking: false, paused: false };

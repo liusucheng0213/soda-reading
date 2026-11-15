@@ -164,29 +164,29 @@ Expected: 全部 PASS；后端离线不阻断普通书架，考试筛选无空�
 - Consumes: `article.questions[]`（每题含 `id/prompt/options/answer/explanationZh/evidenceParagraph/evidenceSentence`）和 Task 3 的来源标签。
 - Produces: `ExamPractice({ article })`；答案和揭示状态只保存在组件内，不写入 FSRS、阅读进度或个人备份。
 
-- [ ] **Step 1: 写隐藏答案、错误/正确作答和重答测试**
+- [x] **Step 1: 写隐藏答案、错误/正确作答和重答测试**
 
 用 jsdom 渲染两道合成题，断言初始 DOM 不含“正确答案”、解析和原文依据区（四个选项本身正常显示）；未选答案时“核对答案”禁用。选择错误项并核对后显示“回答错误”、正确项、中文解析和精确原文依据；改选其他项后解析重新隐藏，再次核对显示“回答正确”。普通文章不渲染答题区。
 
-- [ ] **Step 2: 运行组件测试确认失败**
+- [x] **Step 2: 运行组件测试确认失败**
 
 Run: `npm test -- src/lib/exam-practice.test.js`
 Expected: FAIL，`ExamPractice` 不存在。
 
-- [ ] **Step 3: 实现原生可访问的答题组件**
+- [x] **Step 3: 实现原生可访问的答题组件**
 
 每题使用独立 `<fieldset>`、`<legend>` 和同名 radio 组，选项 label 可点击并支持方向键。只有读者主动点击“核对答案”才揭示结果；结果区用适度的 `role="status"`，原文依据直接引用英文句子，不另开 dialog、popover 或底部 sheet。组件不显示分数、积分或掌握建议。
 
-- [ ] **Step 4: 将答题区接入正文末尾**
+- [x] **Step 4: 将答题区接入正文末尾**
 
 在最后一章正文与 `ReadingCompletion` 之间，仅对 `examTrack` 非空且题目存在的文章渲染 `ExamPractice`。在现有文章元信息处显示考试轨道、CEFR 和 `examOriginLabel()`；不添加正文后版权 footer。样式沿用纸面、 hairline 和现有按钮密度，并覆盖 390px、清晰焦点及 `prefers-reduced-motion`。
 
-- [ ] **Step 5: 运行前端回归与构建**
+- [x] **Step 5: 运行前端回归与构建**
 
 Run: `npm test && npm run build:web && npm run build:admin`
 Expected: 全部 PASS，普通阅读器和管理端产物断言均通过。
 
-- [ ] **Step 6: 仅在用户明确要求后提交本任务**
+- [x] **Step 6: 仅在用户明确要求后提交本任务**
 
 ### Task 5: 学习闭环、真实服务验收与文档同步
 

@@ -64,6 +64,8 @@ import {
 import { chapterIdFromKey, chapterOverallProgress, legacyLocationKeyForDocument, normalizeReadingPosition, updateReadingPosition, withChapterKey } from "../lib/readingPosition.js";
 import { ChapterNavigation } from "./reader/ChapterNavigation.jsx";
 import { ReadingCompletion } from "./ReadingCompletion.jsx";
+import { ExamPractice } from "./ExamPractice.jsx";
+import { EXAM_TRACK_LABELS, examOriginLabel } from "../lib/exams.js";
 
 function keysInRange(unit, startKey, endKey) {
   const nodes = [...unit.querySelectorAll("[data-word-key]")];
@@ -1055,7 +1057,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
         <button className="reader-back-link" onClick={onBack}><ArrowLeft size={19} />返回</button>
         <div className="reader-desktop-brand">苏打阅读<small>SODA READING</small></div>
         <div className="reader-book-info">
-          <span>{article.topic ?? "本地内容"} · {article.cefr ?? "自定义"}</span>
+          <span>{article.examTrack ? [EXAM_TRACK_LABELS[article.examTrack] ?? "备考", article.cefr, examOriginLabel(article)].filter(Boolean).join(" · ") : `${article.topic ?? "本地内容"} · ${article.cefr ?? "自定义"}`}</span>
           <h1>{article.title}</h1>
           <p>{article.author ?? article.source}</p>
         </div>
@@ -1284,7 +1286,7 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             reportProgress(chapterOverallProgress(chapters, activeChapterId, chapterProgress), chapterProgress);
           }}
         >
-          <div className="reader-title-block"><span>{article.topic ?? "本地内容"} · {article.cefr}</span><h1>{article.title}</h1>{chapters.length > 1 && <p>{activeChapter?.title}</p>}</div>
+          <div className="reader-title-block"><span>{article.examTrack ? [EXAM_TRACK_LABELS[article.examTrack] ?? "备考", article.cefr, examOriginLabel(article)].filter(Boolean).join(" · ") : `${article.topic ?? "本地内容"} · ${article.cefr}`}</span><h1>{article.title}</h1>{chapters.length > 1 && <p>{activeChapter?.title}</p>}</div>
           {paragraphs.map((paragraph, paragraphIndex) => {
             const sentences = splitSentences(paragraph);
             const previousSentences = paragraphIndex > 0 ? splitSentences(paragraphs[paragraphIndex - 1]) : [];
@@ -1463,15 +1465,18 @@ export function ReaderScreen({ article, theme, readingPrefs, onReadingPrefsChang
             </nav>
           )}
           {activeChapterIndex === chapters.length - 1 && (
-            <ReadingCompletion
-              article={article}
-              vocabularyCount={articleWords.length}
-              feedback={feedback}
-              onFeedback={onFeedback}
-              onReview={onReview}
-              onAdjustLevel={onAdjustLevel}
-              onBack={onBack}
-            />
+            <>
+              {article.examTrack && article.questions?.length > 0 && <ExamPractice key={article.id} article={article} />}
+              <ReadingCompletion
+                article={article}
+                vocabularyCount={articleWords.length}
+                feedback={feedback}
+                onFeedback={onFeedback}
+                onReview={onReview}
+                onAdjustLevel={onAdjustLevel}
+                onBack={onBack}
+              />
+            </>
           )}
         </article>
       </section>
