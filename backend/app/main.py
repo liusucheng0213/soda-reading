@@ -6,6 +6,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .content import ContentService
+from .content_editorial import EditorialGateway
+from .model_center import MODEL_CENTER_PATH, ModelCenterStore
 from .provider_config import public_config, save_overrides
 from .schemas import (
     ArticleReviewRequest,
@@ -19,8 +21,10 @@ from .translation import TranslationGateway, TranslationUnavailable
 
 app = FastAPI(title="苏打阅读 API", version="0.1.0")
 settings = get_settings()
-gateway = TranslationGateway(settings)
-content_service = ContentService(settings)
+model_store = ModelCenterStore(MODEL_CENTER_PATH)
+gateway = TranslationGateway(settings, store=model_store)
+content_service = ContentService(settings, model_store=model_store)
+content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,14 +121,24 @@ async def admin_provider_config() -> dict:
 @app.put("/admin/providers/config", dependencies=[Depends(require_admin)])
 async def admin_save_provider_config(payload: ProviderConfigRequest) -> dict:
     global gateway
-    save_overrides(payload.model_dump())
-    gateway = TranslationGateway(settings)
+    try:
+        save_overrides(payload.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    gateway = TranslationGateway(settings, store=model_store)
+    content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
     return {"saved": True, "config": public_config(), "providers": gateway.provider_status()}
 
 
 @app.get("/admin/translation", dependencies=[Depends(require_admin)])
 async def admin_translation() -> dict:
     return gateway.overview()
+
+
+@app.delete("/admin/translation/cache", dependencies=[Depends(require_admin)])
+async def admin_clear_translation_cache() -> dict:
+    cleared = gateway.clear_cache()
+    return {"cleared": cleared, "overview": gateway.overview()}
 
 
 @app.get("/admin/content/runs", dependencies=[Depends(require_admin)])

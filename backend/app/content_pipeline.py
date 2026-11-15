@@ -300,11 +300,11 @@ def difficulty_metrics(paragraphs: list[str]) -> dict[str, Any]:
 
 
 class ContentPipeline:
-    def __init__(self, settings: Settings, database: ContentDatabase):
+    def __init__(self, settings: Settings, database: ContentDatabase, model_store=None):
         self.settings = settings
         self.database = database
         self.adapters = build_adapters(settings, database)
-        self.editorial = EditorialGateway(settings)
+        self.editorial = EditorialGateway(settings, store=model_store)
 
     def initialize(self) -> None:
         self.database.initialize()

@@ -4,12 +4,16 @@ import asyncio
 import json
 import re
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+from .model_center import BudgetExceeded, ModelCenterStore, openai_usage
+from .provider_config import Provider, load_overrides, provider_definitions, task_provider_order
 from .settings import Settings
+
+
+EditorialProvider = Provider
 
 
 LEVEL_TARGETS = {
@@ -22,60 +26,27 @@ LEVEL_TARGETS = {
 }
 
 
-@dataclass
-class EditorialProvider:
-    name: str
-    base_url: str
-    model: str
-    api_key: str
-    may_charge: bool = False
-    cheap_api: bool = False
-
-    @property
-    def configured(self) -> bool:
-        return bool(self.api_key)
-
-
 class EditorialUnavailable(RuntimeError):
     pass
 
 
 class EditorialGateway:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, store: ModelCenterStore | None = None):
         self.settings = settings
-        self._paid_budget_lock = asyncio.Lock()
-        self._paid_reserved_cny: dict[str, float] = {}
-        definitions = {
-            "zhipu": EditorialProvider(
-                "zhipu", "https://open.bigmodel.cn/api/paas/v4", settings.zhipu_model, settings.zhipu_api_key
-            ),
-            "modelscope": EditorialProvider(
-                "modelscope", "https://api-inference.modelscope.cn/v1", settings.modelscope_model,
-                settings.modelscope_access_token,
-            ),
-            "siliconflow": EditorialProvider(
-                "siliconflow", "https://api.siliconflow.cn/v1", settings.siliconflow_model,
-                settings.siliconflow_api_key, "72b" in settings.siliconflow_model.lower(),
-            ),
-            "deepseek": EditorialProvider(
-                "deepseek",
-                "https://api.deepseek.com",
-                settings.deepseek_model,
-                settings.deepseek_api_key,
-                may_charge=True,
-                cheap_api=True,
-            ),
-        }
+        self.store = store or ModelCenterStore()
+        overrides = load_overrides()
+        definitions = provider_definitions(settings, overrides)
+        requested_names = task_provider_order("daily_article", settings, overrides)
         self.providers = [
             definitions[name]
-            for name in settings.editorial_order
-            if name in definitions and self._route_allowed(definitions[name])
+            for name in requested_names
+            if name in definitions and definitions[name].kind == "openai" and self._route_allowed(definitions[name])
         ]
         self.cooldown_until: dict[str, float] = {}
         base_quality = {"zhipu": 0.96, "deepseek": 0.95, "modelscope": 0.88, "siliconflow": 0.65}
         self.metrics = {
             name: {
-                "quality": base_quality[name],
+                "quality": base_quality.get(name, 0.75),
                 "successes": 0,
                 "failures": 0,
                 "latencyMs": None,
@@ -106,23 +77,96 @@ class EditorialGateway:
             and self.settings.paid_request_max_cny > 0
         )
 
-    async def _reserve_paid_usage(self, provider: EditorialProvider, body: dict) -> None:
-        if not provider.may_charge:
-            return
-        if not self._route_allowed(provider):
-            raise EditorialUnavailable("付费内容模型未启用或预算未配置")
+    @staticmethod
+    def _estimated_paid_cost(provider: EditorialProvider, body: dict) -> float:
         serialized = json.dumps(body, ensure_ascii=False)
         estimated_tokens = max(1, len(serialized) / 4) + int(body.get("max_tokens") or 0)
         cny_per_million = {"deepseek": 8.0, "siliconflow": 8.0}.get(provider.name, 10.0)
-        estimate = max(0.0001, estimated_tokens * cny_per_million / 1_000_000)
-        if estimate > self.settings.paid_request_max_cny:
-            raise EditorialUnavailable("本次内容生成预计费用超过单次上限")
-        day = time.strftime("%Y-%m-%d", time.gmtime())
-        async with self._paid_budget_lock:
-            spent = self._paid_reserved_cny.get(day, 0)
-            if spent + estimate > self.settings.daily_paid_budget_cny:
-                raise EditorialUnavailable("今日付费内容生成预算已用完")
-            self._paid_reserved_cny[day] = spent + estimate
+        return max(0.0001, estimated_tokens * cny_per_million / 1_000_000)
+
+    async def _reserve_paid_usage(self, provider: EditorialProvider, body: dict):
+        if not provider.may_charge:
+            return None
+        if not self._route_allowed(provider):
+            raise EditorialUnavailable("付费内容模型未启用或预算未配置")
+        try:
+            return await self.store.reserve(
+                "daily_article", provider.name, self._estimated_paid_cost(provider, body),
+                self.settings.daily_paid_budget_cny,
+                self.settings.paid_request_max_cny,
+            )
+        except BudgetExceeded as error:
+            raise EditorialUnavailable(str(error)) from error
+
+    async def _post(self, provider: EditorialProvider, body: dict) -> dict:
+        reservation = await self._reserve_paid_usage(provider, body)
+        request_body = dict(body)
+        try:
+            async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    headers={"Authorization": f"Bearer {provider.api_key}"},
+                    json=body,
+                )
+                if response.status_code == 400:
+                    retry_body = dict(body)
+                    retry_body.pop("response_format", None)
+                    retry_body.pop("thinking", None)
+                    retry_body.pop("enable_thinking", None)
+                    response = await client.post(
+                        "/chat/completions",
+                        headers={"Authorization": f"Bearer {provider.api_key}"},
+                        json=retry_body,
+                    )
+                response.raise_for_status()
+                payload = response.json()
+                payload["_requestBody"] = request_body
+                payload["_reservation"] = reservation
+                return payload
+        except BaseException:
+            if reservation:
+                await self.store.release(reservation)
+            raise
+
+    def _with_usage(self, result: dict, payload: dict, provider: EditorialProvider) -> dict:
+        usage = openai_usage(payload.get("usage"))
+        if usage is not None:
+            result["_usage"] = usage
+        request_body = payload.get("_requestBody") or {}
+        reservation = payload.get("_reservation")
+        result["_requestBody"] = request_body
+        result["_reservation"] = reservation
+        result["_estimatedCny"] = reservation.amount if reservation else 0
+        result["_usageDay"] = reservation.day if reservation else None
+        return result
+
+    @staticmethod
+    def _estimated_token_count(value: dict) -> int:
+        return max(1, round(len(json.dumps(value, ensure_ascii=False)) / 4))
+
+    async def _record_usage(self, provider: EditorialProvider, body: dict, result: dict) -> None:
+        usage = result.get("_usage", {})
+        reported = bool(usage)
+        request_body = result.get("_requestBody") or body
+        visible_result = {key: value for key, value in result.items() if not key.startswith("_")}
+        input_tokens = usage.get("input_tokens", 0) if reported else self._estimated_token_count(request_body)
+        output_tokens = usage.get("output_tokens", 0) if reported else self._estimated_token_count(visible_result)
+        await self.store.record_usage(
+            "daily_article", provider.name, provider.model, True,
+            input_tokens, output_tokens, reported, result.get("_estimatedCny", 0),
+            day=result.get("_usageDay"),
+        )
+
+    async def _release_reservation(self, result: dict | None) -> None:
+        reservation = (result or {}).pop("_reservation", None)
+        if reservation:
+            await self.store.release(reservation)
+
+    async def _record_failure(self, provider: EditorialProvider, result: dict | None = None) -> None:
+        await self._release_reservation(result)
+        await self.store.record_usage(
+            "daily_article", provider.name, provider.model, False, 0, 0, False, 0,
+        )
 
     async def generate(self, topic: str, level: str, evidence: list[dict[str, Any]]) -> dict:
         if level not in LEVEL_TARGETS:
@@ -136,6 +180,7 @@ class EditorialGateway:
                 break
             timeout = min(self.settings.editorial_provider_timeout_ms / 1000, remaining)
             provider_started = time.perf_counter()
+            result = None
             try:
                 result = await asyncio.wait_for(
                     self._call(provider, topic, level, evidence),
@@ -151,17 +196,24 @@ class EditorialGateway:
                 metric = self.metrics[provider.name]
                 metric["successes"] += 1
                 metric["latencyMs"] = round((time.perf_counter() - provider_started) * 1000)
+                await self._record_usage(provider, {"topic": topic, "level": level, "evidence": evidence[:4]}, result)
                 return validated
             except httpx.HTTPStatusError as error:
+                await self._record_failure(provider, result)
                 self.metrics[provider.name]["failures"] += 1
                 if error.response.status_code == 429:
                     self.cooldown_until[provider.name] = time.monotonic() + 60
             except (asyncio.TimeoutError, TimeoutError):
+                await self._record_failure(provider, result)
                 self.metrics[provider.name]["failures"] += 1
                 self.cooldown_until[provider.name] = time.monotonic() + 20
-            except (ValueError, KeyError, json.JSONDecodeError):
+            except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+                await self._record_failure(provider, result)
                 self.metrics[provider.name]["failures"] += 1
                 self.cooldown_until[provider.name] = time.monotonic() + 10
+            except BaseException:
+                await self._release_reservation(result)
+                raise
         raise EditorialUnavailable("所有可用内容模型当前不可用，已保留备用文章池")
 
     async def intro_zh(self, *, title: str, source: str, topic: str, paragraphs: list[str]) -> str:
@@ -176,6 +228,7 @@ class EditorialGateway:
             remaining = 10 - (time.monotonic() - started)
             if remaining <= 0.4:
                 break
+            result = None
             try:
                 result = await asyncio.wait_for(
                     self._call_intro(provider, title, source, topic, excerpt),
@@ -184,9 +237,15 @@ class EditorialGateway:
                 intro = str((result or {}).get("introZh") or "").strip()
                 intro = re.sub(r"\s+", " ", intro)
                 if re.search(r"[\u3400-\u9fff]", intro) and 12 <= len(intro) <= 160:
+                    await self._record_usage(provider, {"title": title, "source": source, "topic": topic}, result)
                     return intro
+                raise ValueError("Editorial introduction failed validation")
             except Exception:
+                await self._record_failure(provider, result)
                 self.cooldown_until[provider.name] = time.monotonic() + 15
+            except BaseException:
+                await self._release_reservation(result)
+                raise
         return fallback
 
     async def english_from_chinese(
@@ -206,16 +265,23 @@ class EditorialGateway:
             remaining = 28 - (time.monotonic() - started)
             if remaining <= 1:
                 break
+            result = None
             try:
                 result = await asyncio.wait_for(
                     self._call_english_from_chinese(provider, title, topic, source, level),
                     timeout=min(22.0, remaining),
                 )
-                return self._validate_english_from_chinese(result)
+                validated = self._validate_english_from_chinese(result)
+                await self._record_usage(provider, {"title": title, "topic": topic}, result)
+                return validated
             except Exception as error:
+                await self._record_failure(provider, result)
                 last_error = error
                 self.metrics[provider.name]["failures"] += 1
                 self.cooldown_until[provider.name] = time.monotonic() + 12
+            except BaseException:
+                await self._release_reservation(result)
+                raise
         raise EditorialUnavailable(str(last_error) if last_error else "无法把中文原文译成控难英语")
 
     async def _call_english_from_chinese(
@@ -259,25 +325,14 @@ class EditorialGateway:
             body["thinking"] = {"type": "disabled"}
         if provider.name == "modelscope":
             body["enable_thinking"] = False
-        await self._reserve_paid_usage(provider, body)
-        async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
-            response = await client.post(
-                "/chat/completions",
-                headers={"Authorization": f"Bearer {provider.api_key}"},
-                json=body,
-            )
-            if response.status_code == 400:
-                body.pop("response_format", None)
-                body.pop("thinking", None)
-                body.pop("enable_thinking", None)
-                response = await client.post(
-                    "/chat/completions",
-                    headers={"Authorization": f"Bearer {provider.api_key}"},
-                    json=body,
-                )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"].get("content") or ""
-        return self._parse_json(content)
+        payload = None
+        try:
+            payload = await self._post(provider, body)
+            content = payload["choices"][0]["message"].get("content") or ""
+            return self._with_usage(self._parse_json(content), payload, provider)
+        except BaseException:
+            await self._release_reservation(payload)
+            raise
 
     @staticmethod
     def _validate_english_from_chinese(result: dict) -> dict:
@@ -331,24 +386,14 @@ class EditorialGateway:
         }
         if provider.name in {"zhipu", "deepseek"}:
             body["thinking"] = {"type": "disabled"}
-        await self._reserve_paid_usage(provider, body)
-        async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
-            response = await client.post(
-                "/chat/completions",
-                headers={"Authorization": f"Bearer {provider.api_key}"},
-                json=body,
-            )
-            if response.status_code == 400:
-                body.pop("response_format", None)
-                body.pop("thinking", None)
-                response = await client.post(
-                    "/chat/completions",
-                    headers={"Authorization": f"Bearer {provider.api_key}"},
-                    json=body,
-                )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"].get("content") or ""
-        return self._parse_json(content)
+        payload = None
+        try:
+            payload = await self._post(provider, body)
+            content = payload["choices"][0]["message"].get("content") or ""
+            return self._with_usage(self._parse_json(content), payload, provider)
+        except BaseException:
+            await self._release_reservation(payload)
+            raise
 
     async def _call(
         self,
@@ -406,16 +451,14 @@ class EditorialGateway:
             body["thinking"] = {"type": "disabled"}
         if provider.name == "modelscope":
             body["enable_thinking"] = False
-        await self._reserve_paid_usage(provider, body)
-        async with httpx.AsyncClient(base_url=provider.base_url, timeout=None) as client:
-            response = await client.post(
-                "/chat/completions",
-                headers={"Authorization": f"Bearer {provider.api_key}"},
-                json=body,
-            )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-        return self._parse_json(content)
+        payload = None
+        try:
+            payload = await self._post(provider, body)
+            content = payload["choices"][0]["message"]["content"]
+            return self._with_usage(self._parse_json(content), payload, provider)
+        except BaseException:
+            await self._release_reservation(payload)
+            raise
 
     @staticmethod
     def _parse_json(content: str) -> dict:

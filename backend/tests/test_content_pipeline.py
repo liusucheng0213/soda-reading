@@ -451,7 +451,7 @@ async def test_editorial_paid_route_stops_when_daily_budget_is_exhausted(monkeyp
         paragraphs=["Libraries create space for reading and conversation."],
     )
     assert "阅读空间" in first
-    gateway.settings.daily_paid_budget_cny = sum(gateway._paid_reserved_cny.values())
+    gateway.settings.daily_paid_budget_cny = gateway.store.reserved_today_cny()
     second = await gateway.intro_zh(
         title="Another City",
         source="Example",

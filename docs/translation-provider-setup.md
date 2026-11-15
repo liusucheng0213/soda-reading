@@ -23,9 +23,9 @@ PAID_REQUEST_MAX_CNY=0.02
 PAID_FALLBACK_MODE=automatic
 ```
 
-`automatic` 是管理员显式允许付费路由的模式，当前阅读端发出的 `qualityMode=free` 请求也可在预算内使用该路由。`manual` 只允许 `qualityMode=precise` 的请求；当前阅读端固定发送 `free`，所以不要在希望阅读端使用 DeepSeek 时选择 `manual`。`never` 始终禁止付费路由。
+`automatic` 是管理员显式允许付费路由的模式，当前阅读端发出的 `qualityMode=free` 请求也可在预算内使用该路由。`manual` 只允许 `qualityMode=precise` 的请求；当前阅读端固定发送 `free`，所以不要在希望阅读端使用 DeepSeek 时选择 `manual`。`never` 禁止阅读端翻译的付费回退。内容生成继续由付费总开关、每日预算和单次上限独立控制，不使用阅读端的 `qualityMode`。
 
-每日预算和单次上限使用进程内保守估算与预留，不是供应商账单，也不能替代平台控制台的消费上限和告警。后端重启会重置内存中的预留记录。内容生成也检查同一组付费开关和预算；长文生成的估算费用如果超过单次上限，会被拒绝而不是绕过限制。
+每日预算和单次上限使用保守估算与预留，不是供应商账单，也不能替代平台控制台的消费上限和告警。预留记录持久保存在本机 `model_center.db`，后端重启后仍可核对；失败请求会释放预留。内容生成也检查同一组付费开关和预算；长文生成的估算费用如果超过单次上限，会被拒绝而不是绕过限制。
 
 ## 1. DeepSeek：默认提供方
 
@@ -62,7 +62,7 @@ ZHIPU_API_KEY=复制的APIKey
 ZHIPU_MODEL=glm-4.7-flash
 ```
 
-这是可选线路，不是默认首选。更换模型时应重新核对计费方式；不要仅凭模型名中的 `flash` 推断永远免费。
+这是可选线路，不是默认首选。仅代码明确列出的免费模型和官方接口地址保留免费分类；更换模型或接口地址后会按 `unverified_model` / `unverified_endpoint` 进入付费护栏。更换模型时仍应重新核对平台计费方式，免费分类不构成价格承诺。
 
 ## 3. 魔搭 ModelScope：可选
 
@@ -78,7 +78,7 @@ MODELSCOPE_ACCESS_TOKEN=复制的Token
 MODELSCOPE_MODEL=Qwen/Qwen3.5-35B-A3B
 ```
 
-在模型页确认所选模型支持 API-Inference。免费额度、并发和支持状态以平台当前说明为准。
+在模型页确认所选模型支持 API-Inference。免费额度、并发和支持状态以平台当前说明为准；换用非默认模型或非官方接口地址会进入付费护栏。
 
 ## 4. 硅基流动：可选
 
@@ -94,7 +94,7 @@ SILICONFLOW_API_KEY=复制的APIKey
 SILICONFLOW_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
 
-在控制台核对模型价格。代码会把模型名包含 `72b` 的硅基流动线路标为可能计费；更换其他模型时仍应以平台实际计费为准。
+在控制台核对模型价格。只有默认免费模型和官方接口地址保留免费分类；更换其他模型或接口地址后会标为可能计费并进入付费护栏。
 
 ## 5. 腾讯机器翻译：可选基础翻译
 
@@ -149,7 +149,7 @@ TRANSLATION_PROVIDER_ORDER=deepseek
 TRANSLATION_PROVIDER_ORDER=deepseek,zhipu,modelscope
 ```
 
-动态路由会结合配置顺序、近期成功率和延迟排序，拥堵线路会短时熔断。保存后重启后端：
+动态路由会结合配置顺序、近期成功率和延迟排序，拥堵线路会短时熔断。管理端保存后会立即重建翻译与内容生成网关，无需重启后端。需要命令行启动时：
 
 ```powershell
 cd backend
@@ -157,4 +157,6 @@ $env:PYTHONPATH="."
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`/admin/providers` 展示配置、阻断和运行状态，`/admin/translation` 展示缓存与付费保护；接口不会返回完整密钥。翻译记忆在后端进程内存和浏览器本地，相同并发请求会合并。
+`/admin/providers` 展示配置、阻断和运行状态，`/admin/providers/config` 分别保存 `translation`、`content_moderation`、`daily_article` 的线路顺序，`/admin/translation` 展示任务用量、缓存与付费保护；接口不会返回完整密钥。云端翻译记忆同时保存在后端内存和本机 `model_center.db`，相同并发请求会合并，重启后仍可复用。管理端可通过 `DELETE /admin/translation/cache` 清理翻译缓存，其他数据不受影响。
+
+用量按任务区分供应商报告 token 与本地估算 token，费用为预算估算而非账单。内容审核路由目前只保存配置，AI 审核和读者端每日文章入口不在本阶段。

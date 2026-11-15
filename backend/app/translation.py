@@ -5,13 +5,13 @@ import json
 import re
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from .provider_config import load_overrides
+from .model_center import BudgetExceeded, ModelCenterStore, openai_usage
+from .provider_config import Provider, load_overrides, provider_definitions, task_provider_order
 from .settings import Settings
 
 
@@ -110,36 +110,17 @@ class ProviderResponseError(RuntimeError):
     pass
 
 
-@dataclass
-class Provider:
-    name: str
-    kind: str
-    base_url: str
-    model: str
-    api_key: str = ""
-    secret_id: str = ""
-    secret_key: str = ""
-    region: str = ""
-    may_charge: bool = False
-    billing_class: str = "free"
-    cheap_api: bool = False
-
-    @property
-    def configured(self) -> bool:
-        if self.kind == "tencent":
-            return bool(self.secret_id and self.secret_key)
-        return bool(self.api_key)
-
-
 class TranslationGateway:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, store: ModelCenterStore | None = None):
         self.settings = settings
+        self.store = store or ModelCenterStore()
         self.cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
         self.inflight: dict[str, asyncio.Task] = {}
         self.failure_cache: dict[str, float] = {}
         self.cooldown_until: dict[str, float] = {}
         self.cache_metrics = {
             "memoryHits": 0,
+            "diskHits": 0,
             "misses": 0,
             "coalesced": 0,
             "writes": 0,
@@ -149,103 +130,9 @@ class TranslationGateway:
             timeout=None,
             limits=httpx.Limits(max_keepalive_connections=8, max_connections=16),
         )
-        self._paid_budget_lock = asyncio.Lock()
-        self._paid_reserved_cny: dict[str, float] = {}
-        definitions = {
-            "modelscope": Provider(
-                "modelscope",
-                "openai",
-                "https://api-inference.modelscope.cn/v1",
-                settings.modelscope_model,
-                api_key=settings.modelscope_access_token,
-                billing_class="free_shared_no_sla",
-            ),
-            "zhipu": Provider(
-                "zhipu",
-                "openai",
-                "https://open.bigmodel.cn/api/paas/v4",
-                settings.zhipu_model,
-                api_key=settings.zhipu_api_key,
-                billing_class="free_model",
-            ),
-            "siliconflow": Provider(
-                "siliconflow",
-                "openai",
-                "https://api.siliconflow.cn/v1",
-                settings.siliconflow_model,
-                api_key=settings.siliconflow_api_key,
-                may_charge="72b" in settings.siliconflow_model.lower(),
-                billing_class=(
-                    "paid"
-                    if "72b" in settings.siliconflow_model.lower()
-                    else "free_shared_rate_limited"
-                ),
-            ),
-            "tencent": Provider(
-                "tencent",
-                "tencent",
-                "https://tmt.tencentcloudapi.com",
-                "TextTranslate",
-                secret_id=settings.tencent_secret_id,
-                secret_key=settings.tencent_secret_key,
-                region=settings.tencent_region,
-                may_charge=not settings.tencent_free_quota_guarded,
-                billing_class=(
-                    "free_monthly_guarded"
-                    if settings.tencent_free_quota_guarded
-                    else "paid_or_unverified_quota"
-                ),
-            ),
-            "dashscope": Provider(
-                "dashscope",
-                "dashscope-mt",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                settings.dashscope_model,
-                api_key=settings.dashscope_api_key,
-                may_charge=True,
-                billing_class="time_limited_then_paid",
-            ),
-            "deepseek": Provider(
-                "deepseek",
-                "openai",
-                "https://api.deepseek.com",
-                settings.deepseek_model,
-                api_key=settings.deepseek_api_key,
-                may_charge=True,
-                cheap_api=True,
-                billing_class="cheap_api",
-            ),
-        }
-        requested_names = list(settings.provider_order)
         overrides = load_overrides()
-        for provider_id, item in (overrides.get("providers") or {}).items():
-            if not isinstance(item, dict):
-                continue
-            api_key = str(item.get("apiKey") or "").strip()
-            model = str(item.get("model") or "").strip()
-            base_url = str(item.get("baseUrl") or "").rstrip("/")
-            if provider_id in definitions:
-                if api_key:
-                    definitions[provider_id].api_key = api_key
-                if model:
-                    definitions[provider_id].model = model
-                if base_url:
-                    definitions[provider_id].base_url = base_url
-            elif item.get("enabled", True) and api_key and model and base_url:
-                definitions[provider_id] = Provider(
-                    provider_id,
-                    str(item.get("kind") or "openai"),
-                    base_url,
-                    model,
-                    api_key=api_key,
-                    may_charge=True,
-                    cheap_api=bool(item.get("cheapApi", True)),
-                    billing_class="user_added",
-                )
-            if item.get("enabled") is False and provider_id in definitions:
-                definitions[provider_id].api_key = ""
-        if overrides.get("order"):
-            requested_names = list(overrides["order"])
+        definitions = provider_definitions(settings, overrides)
+        requested_names = task_provider_order("translation", settings, overrides)
         requested = [definitions[name] for name in requested_names if name in definitions]
         self.providers = [
             provider
@@ -254,10 +141,6 @@ class TranslationGateway:
         ]
         self._all_providers = definitions
         self._provider_position = {provider.name: index for index, provider in enumerate(requested)}
-        self._route_signature = "|".join(
-            f"{provider.name}:{provider.model}:{provider.billing_class}"
-            for provider in requested
-        )
         self.metrics: dict[str, dict[str, Any]] = {}
         enabled = {provider.name for provider in self.providers}
         for provider in definitions.values():
@@ -304,7 +187,6 @@ class TranslationGateway:
             {
                 "scope": scope,
                 "promptVersion": PROMPT_VERSION,
-                "routeSignature": self._route_signature,
                 **normalized,
             },
             ensure_ascii=False,
@@ -387,13 +269,14 @@ class TranslationGateway:
         return result
 
     def overview(self) -> dict:
-        today = datetime.now(timezone.utc).date().isoformat()
         return {
             "promptVersion": PROMPT_VERSION,
+            "tasks": self.store.usage_summary(),
             "dynamicRouting": self.settings.translation_dynamic_routing,
             "cache": {
                 **self.cache_metrics,
                 "memoryEntries": len(self.cache),
+                "diskEntries": self.store.cache_entries(),
                 "ttlSeconds": self.settings.translation_cache_ttl_seconds,
             },
             "costGuard": {
@@ -402,7 +285,7 @@ class TranslationGateway:
                 "dailyBudgetCny": self.settings.daily_paid_budget_cny,
                 "perRequestMaxCny": self.settings.paid_request_max_cny,
                 "tencentFreeQuotaGuarded": self.settings.tencent_free_quota_guarded,
-                "reservedTodayCny": round(self._paid_reserved_cny.get(today, 0), 6),
+                "reservedTodayCny": self.store.reserved_today_cny(),
             },
         }
 
@@ -429,6 +312,11 @@ class TranslationGateway:
         if cached:
             self.cache_metrics["memoryHits"] += 1
             return {**cached, "cached": True, "cacheLayer": "memory", "latencyMs": 0}
+        cached = self.store.cache_get(key)
+        if cached:
+            self._memory_set(key, cached)
+            self.cache_metrics["diskHits"] += 1
+            return {**cached, "cached": True, "cacheLayer": "disk", "latencyMs": 0}
         self.cache_metrics["misses"] += 1
         return None
 
@@ -436,7 +324,12 @@ class TranslationGateway:
         stored = {**value, "cached": False}
         stored.pop("cacheLayer", None)
         self._memory_set(key, stored)
+        self.store.cache_set(key, stored, self.settings.translation_cache_ttl_seconds)
         self.cache_metrics["writes"] += 1
+
+    def clear_cache(self) -> int:
+        self.cache.clear()
+        return self.store.cache_clear()
 
     async def translate(self, scope: str, payload: dict) -> dict:
         key = self._key(scope, payload)
@@ -453,29 +346,38 @@ class TranslationGateway:
             self.cache_metrics["coalesced"] += 1
             result = await asyncio.shield(existing)
             return {**result, "coalesced": True}
-        task = asyncio.create_task(self._translate_uncached(scope, payload))
+        task = asyncio.create_task(self._translate_shared(key, scope, payload))
         self.inflight[key] = task
+        return await asyncio.shield(task)
+
+    async def _translate_shared(self, key: str, scope: str, payload: dict) -> dict:
         try:
-            result = await asyncio.shield(task)
+            result = await self._translate_uncached(scope, payload)
             if result.get("cacheLayer") != "local":
                 await self._cache_set(key, result)
             return result
         except TranslationUnavailable:
-            self.failure_cache[key] = (
-                time.monotonic() + self.settings.translation_failure_ttl_seconds
-            )
+            self.failure_cache[key] = time.monotonic() + self.settings.translation_failure_ttl_seconds
             raise
         finally:
-            if self.inflight.get(key) is task:
+            if self.inflight.get(key) is asyncio.current_task():
                 self.inflight.pop(key, None)
+
+    @staticmethod
+    def _estimated_token_count(value: dict) -> int:
+        return max(1, round(len(json.dumps(value, ensure_ascii=False)) / 4))
 
     async def _attempt_provider(self, provider: Provider, scope: str, payload: dict, timeout: float) -> dict:
         started = time.perf_counter()
-        paid_reservation = 0.0
+        reservation = None
         try:
             if provider.may_charge:
-                paid_reservation = await self._reserve_paid_usage(provider, payload)
+                reservation = await self._reserve_paid_usage(provider, payload)
             result = await asyncio.wait_for(self._call_provider(provider, scope, payload), timeout=timeout)
+            usage = result.pop("_usage", {})
+            tokens_reported = bool(usage)
+            input_tokens = usage.get("input_tokens", 0) if tokens_reported else self._estimated_token_count(payload)
+            output_tokens = usage.get("output_tokens", 0) if tokens_reported else self._estimated_token_count(result)
             result = self._validate_result(scope, result, provider)
             provider_latency = round((time.perf_counter() - started) * 1000)
             metric = self.metrics[provider.name]
@@ -494,6 +396,12 @@ class TranslationGateway:
                 lastError=None,
             )
             self.cooldown_until.pop(provider.name, None)
+            await self.store.record_usage(
+                "translation", provider.name, provider.model, True,
+                input_tokens, output_tokens, tokens_reported,
+                reservation.amount if reservation else 0,
+                day=reservation.day if reservation else None,
+            )
             return {
                 **result,
                 "provider": provider.name,
@@ -503,10 +411,15 @@ class TranslationGateway:
                 "providerLatencyMs": provider_latency,
                 "billingClass": provider.billing_class,
             }
-        except Exception as error:
-            if paid_reservation:
-                await self._release_paid_usage(paid_reservation)
-            self._record_failure(provider, error, round((time.perf_counter() - started) * 1000))
+        except BaseException as error:
+            await self._release_paid_usage(reservation)
+            if isinstance(error, Exception):
+                await self.store.record_usage(
+                    "translation", provider.name, provider.model, False,
+                    self._estimated_token_count(payload), 0, False, 0,
+                    day=reservation.day if reservation else None,
+                )
+                self._record_failure(provider, error, round((time.perf_counter() - started) * 1000))
             raise
 
     def _available_providers(self, payload: dict) -> list[Provider]:
@@ -571,6 +484,8 @@ class TranslationGateway:
                     result = finish(task.result())
                     for other in pending:
                         other.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
                     return result
                 except Exception:
                     continue
@@ -620,25 +535,20 @@ class TranslationGateway:
         }.get(provider.name, 10.0)
         return max(0.0001, estimated_tokens * conservative_cny_per_million / 1_000_000)
 
-    async def _reserve_paid_usage(self, provider: Provider, payload: dict) -> float:
+    async def _reserve_paid_usage(self, provider: Provider, payload: dict):
         estimate = self._estimated_paid_cost(provider, payload)
-        if estimate > self.settings.paid_request_max_cny:
-            raise TranslationUnavailable("本次翻译预计费用超过单次上限")
-        day = datetime.now(timezone.utc).date().isoformat()
-        async with self._paid_budget_lock:
-            spent = self._paid_reserved_cny.get(day, 0)
-            if spent + estimate > self.settings.daily_paid_budget_cny:
-                raise TranslationUnavailable("今日付费翻译预算已用完")
-            self._paid_reserved_cny[day] = spent + estimate
-        return estimate
-
-    async def _release_paid_usage(self, estimate: float) -> None:
-        day = datetime.now(timezone.utc).date().isoformat()
-        async with self._paid_budget_lock:
-            self._paid_reserved_cny[day] = max(
-                0,
-                self._paid_reserved_cny.get(day, 0) - estimate,
+        try:
+            return await self.store.reserve(
+                "translation", provider.name, estimate,
+                self.settings.daily_paid_budget_cny,
+                self.settings.paid_request_max_cny,
             )
+        except BudgetExceeded as error:
+            raise TranslationUnavailable(str(error)) from error
+
+    async def _release_paid_usage(self, reservation) -> None:
+        if reservation:
+            await self.store.release(reservation)
 
     def _record_failure(self, provider: Provider, error: Exception, latency_ms: int = 0) -> None:
         metric = self.metrics[provider.name]
@@ -728,9 +638,14 @@ class TranslationGateway:
                 json=body,
             )
         response.raise_for_status()
-        message = response.json()["choices"][0]["message"]
+        response_payload = response.json()
+        message = response_payload["choices"][0]["message"]
         content = message.get("content") or message.get("reasoning_content") or ""
-        return self._parse_json_content(content)
+        result = self._parse_json_content(content)
+        usage = openai_usage(response_payload.get("usage"))
+        if usage is not None:
+            result["_usage"] = usage
+        return result
 
     async def _call_dashscope_mt(self, provider: Provider, scope: str, payload: dict) -> dict:
         source_text = payload.get("word", "") if scope == "word" else payload["sentence"]

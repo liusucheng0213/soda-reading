@@ -64,7 +64,8 @@ class ProviderOverrideItem(BaseModel):
 
 
 class ProviderConfigRequest(BaseModel):
-    order: list[str] = Field(default_factory=list)
+    order: list[str] | None = None
+    routes: dict[str, list[str]] = Field(default_factory=dict)
     providers: list[ProviderOverrideItem] = Field(default_factory=list)
 
 

@@ -181,6 +181,10 @@ export async function getTranslationOverview() {
   return request("/admin/translation", { timeout: 2400 });
 }
 
+export async function deleteTranslationCache() {
+  return request("/admin/translation/cache", { method: "DELETE", timeout: 5000 });
+}
+
 export async function getSourceStatus() {
   return request("/admin/sources", { timeout: 5000 });
 }

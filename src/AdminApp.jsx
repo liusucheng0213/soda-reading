@@ -6,6 +6,8 @@ import {
   ShieldCheck,
 } from "@phosphor-icons/react";
 import { sourcePolicies } from "./data.js";
+import { ModelTaskRoutes } from "./screens/ModelTaskRoutes.jsx";
+import { ModelUsageSummary } from "./screens/ModelUsageSummary.jsx";
 import {
   getContentCandidates,
   getContentRuns,
@@ -28,7 +30,7 @@ const PROVIDER_LABELS = {
 
 const TABS = [
   { id: "sources", label: "内容来源", icon: ShieldCheck },
-  { id: "models", label: "模型路由", icon: GearSix },
+  { id: "models", label: "模型中心", icon: GearSix },
 ];
 
 function runRatio(run) {
@@ -115,6 +117,10 @@ export function AdminApp() {
     }
   }
 
+  async function refreshModelOverview() {
+    setTranslationOverview(await getTranslationOverview());
+  }
+
   function updateProviderDraft(index, patch) {
     setProviderConfig((current) => {
       if (!current) return current;
@@ -144,7 +150,8 @@ export function AdminApp() {
     setPipelineError("");
     try {
       const result = await saveProviderConfig({
-        order: providerConfig.order,
+        order: providerConfig.routes?.translation ?? providerConfig.order,
+        routes: providerConfig.routes,
         providers: providerConfig.providers.map((item) => ({
           id: item.id,
           label: item.label,
@@ -159,6 +166,7 @@ export function AdminApp() {
       });
       setProviderConfig(result.config);
       setProviders(result.providers || []);
+      await refreshModelOverview();
       setModelNotice("已保存。密钥只留在本机，页面不会再显示完整 Key。");
     } catch (error) {
       setPipelineError(error.message || "模型配置保存失败");
@@ -171,7 +179,6 @@ export function AdminApp() {
   const rankedProviders = [...providers].sort(
     (left, right) => (left.routeRank ?? 99) - (right.routeRank ?? 99),
   );
-  const cacheHits = translationOverview?.cache?.memoryHits ?? 0;
   const latestRun = runs[0];
   const acceptedCandidates = candidates.filter((item) => item.status === "accepted").length;
   const activeSources = sources.filter((item) => item.status === "active").length;
@@ -180,7 +187,7 @@ export function AdminApp() {
     : acceptedCandidates;
   const titles = {
     sources: "内容来源",
-    models: "模型路由",
+    models: "模型中心",
   };
 
   return (
@@ -282,19 +289,12 @@ export function AdminApp() {
           <section className="admin-panel">
             <div className="admin-panel-head">
               <div>
-                <h2>模型路由</h2>
+                <h2>任务路由</h2>
                 <p>默认路由是 DeepSeek，但它可能计费。DeepSeek、cheapApi 和自定义线路都必须显式启用付费、设置正数每日预算与单次上限，并满足请求模式；默认零预算不会调用。密钥只保存在本机。</p>
               </div>
               <span className="route-order">{rankedProviders.filter((provider) => provider.routeRank).map((provider) => PROVIDER_LABELS[provider.provider] ?? provider.provider).join(" → ") || "等待路由状态"}</span>
             </div>
-            {translationOverview && (
-              <div className="translation-guard">
-                <span><strong>{cacheHits}</strong> 缓存命中</span>
-                <span><strong>{translationOverview.cache.coalesced}</strong> 重复请求合并</span>
-                <span><strong>内存</strong> 缓存层</span>
-                <span><strong>{translationOverview.costGuard.paidProvidersEnabled ? `${translationOverview.costGuard.dailyBudgetCny} 元` : "0 元"}</strong> 每日付费上限</span>
-              </div>
-            )}
+            {translationOverview && <ModelUsageSummary overview={translationOverview} onRefresh={refreshModelOverview} />}
             <div className="provider-table">
               {providers.length === 0 && <p className="provider-empty">后端未启动，暂时无法读取路由状态。</p>}
               {rankedProviders.map((provider) => (
@@ -315,18 +315,14 @@ export function AdminApp() {
                 </div>
                 <button type="button" onClick={addCustomProvider}>添加自定义接口</button>
               </div>
-              <label className="provider-order-field">
-                调用顺序
-                <input
-                  value={(providerConfig?.order || []).join(",")}
-                  onChange={(event) => setProviderConfig((current) => ({
-                    ...(current || { providers: [] }),
-                    order: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                  }))}
-                  placeholder="deepseek,zhipu"
-                />
-                <small>用英文逗号分隔 id，排在前面的优先。</small>
-              </label>
+              <ModelTaskRoutes
+                routes={providerConfig?.routes ?? { translation: providerConfig?.order ?? [] }}
+                onChange={(task, order) => setProviderConfig((current) => ({
+                  ...current,
+                  order: task === "translation" ? order : current?.order,
+                  routes: { ...(current?.routes || {}), [task]: order },
+                }))}
+              />
               {(providerConfig?.providers || []).map((item, index) => (
                 <fieldset className="provider-edit" key={item.id || index}>
                   <legend>{item.label || item.id}</legend>

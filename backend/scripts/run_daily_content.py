@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.content import ContentService
+from app.model_center import MODEL_CENTER_PATH, ModelCenterStore
 from app.settings import Settings
 
 
@@ -44,7 +45,7 @@ async def main() -> int:
         raise RuntimeError("Zero-cost guard rejected paid-provider configuration")
     if settings.app_env != "production":
         print("warning: APP_ENV is not production", file=sys.stderr)
-    service = ContentService(settings)
+    service = ContentService(settings, model_store=ModelCenterStore(MODEL_CENTER_PATH))
     requested = int(os.getenv("CONTENT_RUN_LIMIT", str(settings.content_discovery_min)))
     with singleton_lock(service) as acquired:
         if not acquired:

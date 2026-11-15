@@ -1,4 +1,7 @@
 import asyncio
+import os
+
+os.environ["MODEL_CENTER_PATH"] = ":memory:"
 
 import httpx
 import pytest

@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from .content_pipeline import ContentPipeline
+from .model_center import ModelCenterStore
 from .content_sources import SOURCE_POLICIES
 from .content_store import (
     ArticleVariant,
@@ -179,10 +180,10 @@ def rank_fallback(articles: list[dict], preferences: dict) -> list[dict]:
 
 
 class ContentService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, model_store: ModelCenterStore | None = None):
         self.settings = settings
         self.database = ContentDatabase(settings)
-        self.pipeline = ContentPipeline(settings, self.database)
+        self.pipeline = ContentPipeline(settings, self.database, model_store=model_store)
         self.pipeline.initialize()
 
     def source_status(self) -> list[dict]:
