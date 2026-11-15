@@ -402,6 +402,11 @@ class ContentService:
             "difficultyMetrics": article.difficulty_metrics,
             "recommendationScore": score,
             "recommendationReason": reason,
+            "examTrack": article.exam_track,
+            "contentOrigin": article.content_origin,
+            "exam": article.exam_metadata,
+            "questions": article.questions or [],
+            "provenance": article.provenance,
         }
 
     @staticmethod

@@ -156,6 +156,11 @@ class ArticleVariant(Base):
     risk_flags: Mapped[list] = mapped_column(JSON, default=list)
     review_status: Mapped[str] = mapped_column(String(30), default="review", index=True)
     review_note: Mapped[str] = mapped_column(Text, default="")
+    exam_track: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    content_origin: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    exam_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    questions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    provenance: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -226,6 +231,21 @@ class ContentDatabase:
                 if "intro_zh" not in columns:
                     with self.engine.begin() as connection:
                         connection.execute(text("ALTER TABLE article_variants ADD COLUMN intro_zh TEXT DEFAULT ''"))
+                if self.settings.database_url.startswith("sqlite"):
+                    additions = {
+                        "exam_track": "VARCHAR(30)",
+                        "content_origin": "VARCHAR(30)",
+                        "exam_metadata": "JSON",
+                        "questions": "JSON",
+                        "provenance": "JSON",
+                    }
+                    missing = [(name, kind) for name, kind in additions.items() if name not in columns]
+                    if missing:
+                        with self.engine.begin() as connection:
+                            for name, kind in missing:
+                                connection.execute(text(f"ALTER TABLE article_variants ADD COLUMN {name} {kind}"))
+                            if "exam_track" in dict(missing):
+                                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_article_variants_exam_track ON article_variants (exam_track)"))
 
     @contextmanager
     def session(self) -> Iterator[Session]:

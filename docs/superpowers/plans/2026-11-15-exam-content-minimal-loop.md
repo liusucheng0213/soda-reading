@@ -45,7 +45,7 @@
 - Produces: `ExamProvenance`、`ExamQuestion`、`ExamPassage` Pydantic 模型，以及 `validate_exam_passage(payload: dict) -> ExamPassage`。
 - Produces: `ArticleVariant.exam_track/content_origin/exam_metadata/questions/provenance`；普通文章的 API 字段为 `examTrack=None`、`contentOrigin=None`、`questions=[]`。
 
-- [ ] **Step 1: 写有效样本和结构/溯源失败测试**
+- [x] **Step 1: 写有效样本和结构/溯源失败测试**
 
 用一个 `original` 科普样本声明：四级轨道、B2、两个以上段落、4 道题，每题 `prompt/options/answer/explanationZh/evidenceParagraph/evidenceSentence`。测试以下规则：
 - 合法样本通过并保留稳定 `id`；四个轨道和四个来源枚举受控。
@@ -54,24 +54,24 @@
 - 外部来源必须有 HTTPS `sourceUrl`、`retrievedAt`、`license`、`usageBasis`、`sourceLabel/sourceId` 和人工核验时间；`official_exam/licensed_exam` 还必须有合理 `year`。
 - 所有内容模型使用 `ConfigDict(extra="forbid")`；`adapted/original` 不得携带 `officialExam=true` 一类冲突声明，未知字段也直接拒绝。
 
-- [ ] **Step 2: 运行测试确认缺少考试契约**
+- [x] **Step 2: 运行测试确认缺少考试契约**
 
 Run: `cd backend && PYTHONPATH=. python -m pytest tests/test_exam_content.py -q`
 Expected: FAIL，`app.exam_content` 不存在。
 
-- [ ] **Step 3: 实现内容模型与跨字段校验**
+- [x] **Step 3: 实现内容模型与跨字段校验**
 
 `ExamPassage` 至少包含 `id/title/author/topic/cefr/publishedAt/introZh/paragraphs/examTrack/contentOrigin/year/session/region/paper/questions/provenance/sourceReviewedAt/answersReviewedAt`。`validate_exam_passage()` 先进行 Pydantic 形状验证，再检查每题证据定位、正文非空和人工核验日期；错误信息指出具体题号，不返回正文或密钥。
 
-- [ ] **Step 4: 扩展文章存储与普通文章序列化**
+- [x] **Step 4: 扩展文章存储与普通文章序列化**
 
 在 `ArticleVariant` 增加 `exam_track`（可空、索引）、`content_origin`（可空）、`exam_metadata`（JSON）、`questions`（JSON）、`provenance`（JSON）。`ContentDatabase.initialize()` 对新库使用 `create_all`，对既有 SQLite 仅幂等添加这 5 个缺失列；`_article_dict()` 输出 camelCase 字段，并将 `year/session/region/paper` 归入 `exam` 元数据。
 
-- [ ] **Step 5: 验证新库、既有库和回归**
+- [x] **Step 5: 验证新库、既有库和回归**
 
 新增测试：先建立不含考试列的 SQLite，再初始化并确认普通文章仍可读取、考试列为空。运行 `PYTHONPATH=. python -m pytest tests/test_exam_content.py tests/test_content_pipeline.py tests/test_api.py -q`，全部通过后才继续。
 
-- [ ] **Step 6: 仅在用户明确要求后提交本任务**
+- [x] **Step 6: 仅在用户明确要求后提交本任务**
 
 ### Task 2: 首批核验内容包与幂等导入器
 
