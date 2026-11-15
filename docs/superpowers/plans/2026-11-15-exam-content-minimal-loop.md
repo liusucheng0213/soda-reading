@@ -128,29 +128,29 @@ Expected: 首次导入 6 篇，第二次新增 0 篇；按三轨道各返回 2 �
 - Produces: `GET /exams/catalog?track=cet4|cet6|postgraduate`，返回 `{"items": [article...]}`；不传轨道返回全部三轨道，非法轨道返回 422。
 - Produces: `getExamCatalog()`、`EXAM_TRACK_LABELS`、`examOriginLabel(article)` 和 `filterExamArticles(items, track)`。
 
-- [ ] **Step 1: 写 API 隔离与标签测试**
+- [x] **Step 1: 写 API 隔离与标签测试**
 
 后端测试导入 CET4 与考研各一篇，确认按轨道过滤、普通 `/feed/daily` 不含考试文章、普通文章考试字段为空。前端测试确认 `official_exam/licensed_exam` 显示“真题”，`adapted/original` 分别显示“改编/原创模拟”，轨道标签为“CET4 / CET6 / 考研”，筛选不改变 CEFR。
 
-- [ ] **Step 2: 运行新测试确认失败**
+- [x] **Step 2: 运行新测试确认失败**
 
 Run: `cd backend && PYTHONPATH=. python -m pytest tests/test_api.py -k exam -q`；根目录 `npm test -- src/lib/exams.test.js src/lib/api.test.js`。
 Expected: FAIL，目录端点和前端助手不存在。
 
-- [ ] **Step 3: 实现只读目录和前端数据加载**
+- [x] **Step 3: 实现只读目录和前端数据加载**
 
 在 `main.py` 注入共享的 `ExamContentStore` 并添加免登录只读端点。`getExamCatalog()` 不注入伪造的离线考试文章；失败时由 `App` 保存 `examCatalog=[]` 和可显示的错误状态，同时保留普通 feed、馆藏、生词和导入书。
 
-- [ ] **Step 4: 接入书架与原文返回目录**
+- [x] **Step 4: 接入书架与原文返回目录**
 
 `App` 将考试文章加入 resume、Library 和 Vocabulary 使用的全部 `catalog` 计算。`LibraryScreen` 在现有“馆藏”中增加“全部 / CET4 / CET6 / 考研”筛选和克制的文章行，展示轨道、CEFR、来源类型与标题；不使用功能卡片网格。加载失败只在该区域显示“备考内容暂时无法加载，其他馆藏仍可使用”。
 
-- [ ] **Step 5: 验证目录、离线和普通阅读回归**
+- [x] **Step 5: 验证目录、离线和普通阅读回归**
 
 Run: `npm test -- src/lib/exams.test.js src/lib/api.test.js src/lib/feed.test.js && cd backend && PYTHONPATH=. python -m pytest tests/test_api.py tests/test_exam_content.py -q`。
 Expected: 全部 PASS；后端离线不阻断普通书架，考试筛选无空白正文入口。
 
-- [ ] **Step 6: 仅在用户明确要求后提交本任务**
+- [x] **Step 6: 仅在用户明确要求后提交本任务**
 
 ### Task 4: 阅读后的答题、解析与原文依据
 

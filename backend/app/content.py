@@ -268,7 +268,7 @@ class ContentService:
             ):
                 article_ids = [existing.primary_article_id, *existing.alternative_article_ids]
                 stored = list(session.scalars(
-                    select(ArticleVariant).where(ArticleVariant.id.in_(article_ids))
+                    select(ArticleVariant).where(ArticleVariant.id.in_(article_ids), ArticleVariant.exam_track.is_(None))
                 ))
                 by_id = {article.id: article for article in stored}
                 if all(article_id in by_id for article_id in article_ids):
@@ -285,7 +285,7 @@ class ContentService:
                     }
 
             articles = list(session.scalars(
-                select(ArticleVariant).where(ArticleVariant.id.in_(edition.article_ids))
+                select(ArticleVariant).where(ArticleVariant.id.in_(edition.article_ids), ArticleVariant.exam_track.is_(None))
             ))
             if len(articles) < 3:
                 return self._fallback(preferences)
@@ -422,12 +422,22 @@ class ContentService:
         return {
             "primary": {
                 **primary,
+                "examTrack": primary.get("examTrack"),
+                "contentOrigin": primary.get("contentOrigin"),
+                "exam": primary.get("exam"),
+                "questions": primary.get("questions") or [],
+                "provenance": primary.get("provenance"),
                 "recommendationScore": recommendation_score(primary, preferences),
                 "recommendationReason": reason,
             },
             "alternatives": [
                 {
                     **item,
+                    "examTrack": item.get("examTrack"),
+                    "contentOrigin": item.get("contentOrigin"),
+                    "exam": item.get("exam"),
+                    "questions": item.get("questions") or [],
+                    "provenance": item.get("provenance"),
                     "recommendationScore": recommendation_score(item, preferences),
                     "recommendationReason": (
                         f"正好是 {preferred_level}，原文未改写"

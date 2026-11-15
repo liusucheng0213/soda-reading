@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .content import ContentService
 from .content_editorial import EditorialGateway
+from .exam_store import ExamContentStore
 from .model_center import MODEL_CENTER_PATH, ModelCenterStore
 from .provider_config import public_config, save_overrides
 from .schemas import (
@@ -24,6 +25,7 @@ settings = get_settings()
 model_store = ModelCenterStore(MODEL_CENTER_PATH)
 gateway = TranslationGateway(settings, store=model_store)
 content_service = ContentService(settings, model_store=model_store)
+exam_store = ExamContentStore(content_service.database)
 content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
 
 app.add_middleware(
@@ -101,6 +103,11 @@ async def sentence_translation(payload: TranslationRequest) -> dict:
                 "retryable": True,
             },
         ) from error
+
+
+@app.get("/exams/catalog")
+async def exam_catalog(track: Literal["cet4", "cet6", "postgraduate"] | None = Query(default=None)) -> dict:
+    return {"items": exam_store.list(track)}
 
 
 @app.get("/admin/sources", dependencies=[Depends(require_admin)])

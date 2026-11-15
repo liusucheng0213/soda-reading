@@ -166,6 +166,25 @@ describe("word translation API contract", () => {
 });
 
 
+describe("exam catalog API", () => {
+  it("requests the selected track without fabricating offline articles", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: [{ id: "exam-1", examTrack: "cet4" }] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getExamCatalog } = await import("./api.js");
+    const result = await getExamCatalog("cet4");
+    expect(result.items[0].id).toBe("exam-1");
+    expect(fetchMock.mock.calls[0][0]).toContain("/exams/catalog?track=cet4");
+
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    await expect(getExamCatalog()).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
+});
+
+
 describe("local daily feed", () => {
   it("needs no token and falls back to the requested local level when offline", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));

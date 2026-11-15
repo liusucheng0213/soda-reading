@@ -23,7 +23,8 @@ import {
   topicOptions,
   typefaceOptions,
 } from "./data.js";
-import { getDailyFeed, saveProfile } from "./lib/api.js";
+import { getDailyFeed, getExamCatalog, saveProfile } from "./lib/api.js";
+import { EXAM_TRACK_LABELS, examOriginLabel, filterExamArticles } from "./lib/exams.js";
 import { DEFAULT_LOCAL_PROFILE, normalizeProfile } from "./lib/profile.js";
 import { dueCards } from "@soda-reading/core";
 import { inspectAndParseFile } from "./lib/importers.js";
@@ -129,6 +130,8 @@ function SodaApp() {
   const [placement, setPlacement] = useAccountState(accountName, "placement", null);
   const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives, fallback: true });
   const [documents, setDocuments] = useState([]);
+  const [examCatalog, setExamCatalog] = useState([]);
+  const [examError, setExamError] = useState(null);
   const [vocabulary, setVocabulary] = useAccountState(accountName, "vocabulary", EMPTY_LIST);
   const [highlights, setHighlights] = useAccountState(accountName, "highlights", EMPTY_LIST);
   const [progress, setProgress] = useAccountState(accountName, "progress", EMPTY_PROGRESS);
@@ -152,12 +155,13 @@ function SodaApp() {
       shown.primary,
       ...(shown.alternatives ?? []),
       ...fallbackLibrary,
+      ...examCatalog,
       ...documents,
     ]);
     const next = resumeFromProgress(catalog, progress, resume);
     if (!next?.id || next.id === resume?.id) return;
     setResume(next);
-  }, [feed, profile, documents, progress, resume]);
+  }, [feed, profile, examCatalog, documents, progress, resume]);
 
   useEffect(() => {
     let active = true;
@@ -167,6 +171,20 @@ function SodaApp() {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getExamCatalog().then((result) => {
+      if (!active) return;
+      setExamCatalog(result.items ?? []);
+      setExamError("");
+    }).catch((error) => {
+      if (!active) return;
+      setExamCatalog([]);
+      setExamError(error.message || "备考内容加载失败");
+    });
+    return () => { active = false; };
   }, []);
 
   const updateProfile = (next) => {
@@ -315,6 +333,7 @@ function SodaApp() {
     shownFeed.primary,
     ...(shownFeed.alternatives ?? []),
     ...fallbackLibrary,
+    ...examCatalog,
     ...documents,
   ]);
   const dueReviewCount = dueCards(vocabulary, profile.reviewLimit ?? 20).length;
@@ -342,6 +361,8 @@ function SodaApp() {
           <LibraryScreen
             documents={documents}
             catalog={uniqueArticles([shownFeed.primary, ...(shownFeed.alternatives ?? []), ...fallbackLibrary])}
+            examCatalog={examCatalog}
+            examError={examError}
             progress={progress}
             onDocumentsChange={setDocuments}
             onOpen={openArticle}
@@ -502,8 +523,10 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticl
   );
 }
 
-function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChange, onOpen, closedArticleId }) {
+export function LibraryScreen({ documents, catalog = [], examCatalog = [], examError = null, progress = {}, onDocumentsChange, onOpen, closedArticleId }) {
   const inputRef = useRef(null);
+  const [examTrack, setExamTrack] = useState("all");
+  const filteredExams = filterExamArticles(examCatalog, examTrack);
   const [importState, setImportState] = useState({ loading: false, message: "", error: "" });
 
   const importFile = async (event) => {
@@ -553,6 +576,43 @@ function LibraryScreen({ documents, catalog = [], progress = {}, onDocumentsChan
           </div>
         </>
       )}
+      <section className="exam-shelf" aria-labelledby="exam-shelf-title">
+        <div className="section-heading"><h3 id="exam-shelf-title">备考</h3><span>{filteredExams.length} 篇</span></div>
+        <div className="exam-filter" role="group" aria-label="考试轨道">
+          {["all", "cet4", "cet6", "postgraduate"].map((track) => (
+            <button
+              key={track}
+              type="button"
+              aria-pressed={examTrack === track}
+              className={examTrack === track ? "selected" : ""}
+              onClick={() => setExamTrack(track)}
+            >
+              {track === "all" ? "全部" : EXAM_TRACK_LABELS[track]}
+            </button>
+          ))}
+        </div>
+        {examError === null && <p className="inline-status">正在加载备考内容…</p>}
+        {examError && <p className="inline-status" role="status">备考内容暂时无法加载，其他馆藏仍可使用</p>}
+        {examError === "" && filteredExams.length === 0 && <p className="inline-status">这个轨道暂时没有可阅读的文章。</p>}
+        {examError === "" && filteredExams.length > 0 && (
+          <div className="article-list">
+            {filteredExams.map((article) => (
+              <div key={article.id}>
+                <button className="article-row" onClick={() => onOpen(article)}>
+                  <span className="article-topic">{EXAM_TRACK_LABELS[article.examTrack] ?? "备考"}</span>
+                  <span className="article-row-copy">
+                    <strong>{article.title}</strong>
+                    {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}
+                    <small>{[article.cefr, examOriginLabel(article), `${remainingMinutes(article, progress[article.id] ?? 0)} 分钟`].filter(Boolean).join(" · ")}</small>
+                  </span>
+                  <BookOpenText size={20} />
+                </button>
+                {closedArticleId === article.id && <p className="inline-status error">这篇还没有正文，暂时打不开。</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
       <div className="section-heading"><h3>本地</h3><span>{documents.length} 项</span></div>
       {documents.length === 0 ? (
         <div className="empty-state compact"><Books size={36} weight="thin" /><h3>还没有导入的书</h3></div>

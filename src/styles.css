@@ -72,6 +72,9 @@ body {
 .screen-header h1 { margin: 5px 0 0; font: 500 32px/1.05 "Newsreader", "Noto Serif SC", serif; letter-spacing: -0.02em; }
 .eyebrow, .brand-kicker { color: var(--mint-deep); font-size: 10px; font-weight: 600; letter-spacing: 0.16em; }
 .level-badge, .count-label { display: grid; place-items: center; min-width: 46px; height: 46px; border: 1px solid var(--hairline); border-radius: 50%; color: var(--mint-deep); font-weight: 600; background: var(--surface-strong); }
+.exam-filter { display: flex; gap: 4px; margin: 0 0 16px; overflow-x: auto; }
+.exam-filter button { flex: none; min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer; }
+.exam-filter button[aria-pressed="true"] { color: var(--mint-deep); border-bottom-color: var(--mint-deep); }
 .level-switcher { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--hairline); background: color-mix(in srgb, var(--surface-strong) 70%, transparent); }
 .level-switcher button { min-width: 44px; min-height: 36px; padding: 0 9px; border: 0; background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; }
 .level-switcher button.selected { background: var(--surface-strong); color: var(--mint-deep); }

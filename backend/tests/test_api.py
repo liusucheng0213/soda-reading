@@ -424,3 +424,46 @@ def test_feed_accepts_full_cefr_range_without_accounts():
         response = client.get("/feed/daily", params={"level": level, "topics": "文化"})
         assert response.status_code == 200
         assert response.json()["primary"]["paragraphs"]
+
+
+def test_exam_catalog_filters_tracks_and_never_enters_daily_feed(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime
+    from pathlib import Path
+    from zoneinfo import ZoneInfo
+
+    from app.content import ContentService
+    from app.content_store import DailyEdition
+    from app.exam_store import ExamContentStore
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'exam-api.db'}", editorial_provider_order="")
+    service = ContentService(settings)
+    store = ExamContentStore(service.database)
+    content_dir = Path(__file__).parent.parent / "content" / "exams"
+    filenames = ["cet4-shady-streets.json", "cet6-soil-life.json", "postgraduate-helpful-maps.json"]
+    imported = [store.import_passage(json.loads((content_dir / filename).read_text(encoding="utf-8"))) for filename in filenames]
+    with service.database.session() as session:
+        session.add(DailyEdition(
+            edition_date=datetime.now(ZoneInfo(settings.content_timezone)).date(),
+            status="published",
+            article_ids=[article["id"] for article in imported],
+        ))
+    monkeypatch.setattr(main_module, "content_service", service)
+    monkeypatch.setattr(main_module, "exam_store", store, raising=False)
+
+    response = client.get("/exams/catalog", params={"track": "cet4"})
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == ["cet4-shady-streets-original"]
+    assert items[0]["examTrack"] == "cet4"
+    assert items[0]["contentOrigin"] == "original"
+    assert len(items[0]["questions"]) == 4
+    assert client.get("/exams/catalog", params={"track": "ielts"}).status_code == 422
+    assert client.get("/exams/catalog", params={"track": "high_school"}).status_code == 422
+
+    feed = client.get("/feed/daily", params={"level": "B2", "topics": "自然"}).json()
+    feed_items = [feed["primary"], *feed["alternatives"]]
+    assert not ({item["id"] for item in feed_items} & {article["id"] for article in imported})
+    assert all(item["examTrack"] is None for item in feed_items)
+    assert all(item["contentOrigin"] is None for item in feed_items)
+    assert all(item["questions"] == [] for item in feed_items)

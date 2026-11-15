@@ -173,6 +173,11 @@ export async function getDailyFeed(preferences = {}) {
   };
 }
 
+export async function getExamCatalog(track) {
+  const query = track && track !== "all" ? `?track=${encodeURIComponent(track)}` : "";
+  return request(`/exams/catalog${query}`, { timeout: 4000 });
+}
+
 export async function getProviderStatus() {
   return request("/admin/providers", { timeout: 2400 });
 }
