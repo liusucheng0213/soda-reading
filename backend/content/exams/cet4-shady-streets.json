@@ -1,0 +1,68 @@
+{
+  "id": "cet4-shady-streets-original",
+  "title": "Why Cities Need Shady Streets",
+  "author": "苏打阅读编辑部",
+  "topic": "自然",
+  "cefr": "B1",
+  "publishedAt": "2026-11-15T08:00:00+08:00",
+  "introZh": "从街道树荫看城市规划如何影响行人的日常生活。",
+  "paragraphs": [
+    "On a hot afternoon, a dark road can hold heat long after the sun has moved away. People walking beside it may feel much warmer than people in a nearby park. This difference is not only a matter of comfort. It can decide whether people choose to walk at all.",
+    "Trees can help because their leaves block some sunlight before it reaches the road. They also release small amounts of water through their leaves, and this process can cool the air around them. However, planting a tree does not solve every problem. A young tree needs water and care before it can give useful shade.",
+    "For this reason, a useful street plan must include both planting and long-term care. Residents can help choose places where shade is most needed, such as bus stops and walking routes to schools. The goal is not simply to make a street look greener. The goal is to make everyday travel safer and more comfortable."
+  ],
+  "examTrack": "cet4",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "What can a dark road do on a hot day?",
+      "options": ["Hold heat after the sun moves away", "Cool people before noon", "Stop people from visiting parks", "Turn sunlight into water"],
+      "answer": "A",
+      "explanationZh": "首句指出深色道路在太阳移开后仍能保存热量。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "On a hot afternoon, a dark road can hold heat long after the sun has moved away."
+    },
+    {
+      "id": "q2",
+      "prompt": "How can trees cool the air around them?",
+      "options": ["By making the road darker", "By releasing water through their leaves", "By stopping all wind", "By keeping people indoors"],
+      "answer": "B",
+      "explanationZh": "第二段说明树叶释放少量水分，这一过程可冷却周围空气。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "They also release small amounts of water through their leaves, and this process can cool the air around them."
+    },
+    {
+      "id": "q3",
+      "prompt": "Why does a young tree need care?",
+      "options": ["It cannot grow near schools", "It makes too much shade", "It needs time before it can provide useful shade", "It always harms the road"],
+      "answer": "C",
+      "explanationZh": "幼树需要水和照料，成长后才能提供有用的树荫，并非种下就立刻有效。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "A young tree needs water and care before it can give useful shade."
+    },
+    {
+      "id": "q4",
+      "prompt": "What is the best title for this passage?",
+      "options": ["Why Parks Should Close Early", "The Fastest Way to Plant Trees", "How Roads Become Dark", "Planning Streets for Shade and Comfort"],
+      "answer": "D",
+      "explanationZh": "全文围绕树荫规划及长期维护如何改善步行体验展开。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "The goal is to make everyday travel safer and more comfortable."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "cet4-shady-streets-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-15T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-15T09:30:00+08:00"
+}

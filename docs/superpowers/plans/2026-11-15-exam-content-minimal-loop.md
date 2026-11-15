@@ -86,31 +86,31 @@ Expected: FAIL，`app.exam_content` 不存在。
 - Produces: `ExamContentStore(database).import_passage(payload: dict) -> dict`、`.list(track: str | None = None) -> list[dict]`。
 - Produces: CLI `PYTHONPATH=. python scripts/import_exam_content.py content/exams`；任一文件无效时退出非零且不写入任何一篇。
 
-- [ ] **Step 1: 写导入事务、幂等与正文保护测试**
+- [x] **Step 1: 写导入事务、幂等与正文保护测试**
 
 测试空库导入后 `list("cet4")` 只返回该轨道；重复导入同一文件总数不变；同 ID 不同段落抛出 `ValueError`；同一批次第二个文件含错误证据句时，第一篇也不能留在数据库。只有序列化后的 `review_status="approved"` 且通过全部校验的内容进入目录。
 
-- [ ] **Step 2: 运行导入测试确认失败**
+- [x] **Step 2: 运行导入测试确认失败**
 
 Run: `cd backend && PYTHONPATH=. python -m pytest tests/test_exam_content.py -k "import or list" -q`
 Expected: FAIL，`ExamContentStore` 不存在。
 
-- [ ] **Step 3: 实现事务导入与目录查询**
+- [x] **Step 3: 实现事务导入与目录查询**
 
 `ExamContentStore` 使用 `ContentDatabase.session()` 的同一事务，复用现有 `SourcePolicyRecord/ContentCandidate/StoryCluster` 外键关系，并为每篇内容使用稳定来源、候选、聚簇和文章 ID。保存正文哈希、CEFR、词数、`max(2, ceil(word_count / 180))` 阅读分钟、来源数组、题目和完整溯源；重复导入同一 `body_hash` 直接返回既有文章，同 ID 不同哈希必须拒绝。`list()` 按轨道和 `review_status="approved"` 查询，并复用 `ContentService._article_dict()` 的输出契约。
 
 CLI 先读取并验证目录内全部 JSON，再用一个事务导入；输出仅含 ID、轨道、来源类型和数量，不调用模型或网络。
 
-- [ ] **Step 4: 编写并逐篇核验 6 个内容文件**
+- [x] **Step 4: 编写并逐篇核验 6 个内容文件**
 
 每个轨道准备科普、故事各 1 篇，每篇 4 题，题材和语言难度与轨道相符。逐题由内容编辑对照原文确认答案、解析和证据句，并填写 `answersReviewedAt`；逐篇检查来源 URL、获取时间、许可/使用依据并填写 `sourceReviewedAt`。来源或使用依据不确定的外部文本不得入库，可改为明确标注的原创模拟，但不得保留“真题”表述。
 
-- [ ] **Step 5: 验证真实内容包与导入器**
+- [x] **Step 5: 验证真实内容包与导入器**
 
 Run: 在临时目录准备隔离数据库，执行 `cd backend && DATABASE_URL=sqlite:///<临时绝对路径>/exams.db PYTHONPATH=. python scripts/import_exam_content.py content/exams` 两次；结束后删除临时数据库。
 Expected: 首次导入 6 篇，第二次新增 0 篇；按三轨道各返回 2 篇，24 题证据校验全部通过，完整后端测试通过。
 
-- [ ] **Step 6: 仅在用户明确要求后提交本任务**
+- [x] **Step 6: 仅在用户明确要求后提交本任务**
 
 ### Task 3: 只读考试 API 与书架轨道筛选
 

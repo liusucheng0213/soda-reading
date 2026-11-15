@@ -1,0 +1,68 @@
+{
+  "id": "cet6-soil-life-original",
+  "title": "The Hidden Life of Healthy Soil",
+  "author": "苏打阅读编辑部",
+  "topic": "自然",
+  "cefr": "B2",
+  "publishedAt": "2026-11-15T08:00:00+08:00",
+  "introZh": "理解土壤中的生命，以及为何简单增加投入并不总能改善土地。",
+  "paragraphs": [
+    "Soil is often treated as if it were only a material that holds plants upright. In fact, a small handful can contain a complex community of living things. Bacteria, fungi, insects, and larger animals interact with roots and with one another. Together, they help break down dead material and make nutrients available for new growth.",
+    "Because these relationships are complicated, adding more of one input does not necessarily improve the whole system. A treatment that increases a crop in one field may produce a different result in another. Soil type, weather, and existing organisms can all influence the outcome. Farmers therefore need to observe local conditions rather than assume that one method will work everywhere.",
+    "Careful observation does not mean rejecting new tools. It means testing whether a tool serves the needs of a particular place. Leaving plant remains on a field, for example, may provide food for useful organisms, but its value depends on how the practice fits the wider farming system. Healthy soil is not produced by a single action; it is supported by a set of informed choices."
+  ],
+  "examTrack": "cet6",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "How does the author challenge a common view of soil?",
+      "options": ["By showing that soil contains no living things", "By showing that soil is a complex living community", "By proving that plants do not need soil", "By claiming that all soil is identical"],
+      "answer": "B",
+      "explanationZh": "作者反驳土壤只是支撑植物的材料这一看法，强调其中存在复杂的生物群落。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "In fact, a small handful can contain a complex community of living things."
+    },
+    {
+      "id": "q2",
+      "prompt": "Why may the same treatment have different results in different fields?",
+      "options": ["Farmers never follow instructions", "Crops always grow without nutrients", "Local soil, weather, and organisms differ", "New tools are always unsafe"],
+      "answer": "C",
+      "explanationZh": "第二段明确列出土壤类型、天气和已有生物都会影响处理结果。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "Soil type, weather, and existing organisms can all influence the outcome."
+    },
+    {
+      "id": "q3",
+      "prompt": "What is the author's attitude toward new farming tools?",
+      "options": ["They should be assessed for local needs", "They should replace all observation", "They should be rejected completely", "They guarantee healthy soil"],
+      "answer": "A",
+      "explanationZh": "作者并不反对新工具，而是主张检验工具是否适合具体地点的需求。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "It means testing whether a tool serves the needs of a particular place."
+    },
+    {
+      "id": "q4",
+      "prompt": "Which statement best expresses the main idea?",
+      "options": ["More fertilizer always creates healthy soil", "Old farming methods are always best", "Insects are the only important organisms", "Soil health depends on informed, connected choices"],
+      "answer": "D",
+      "explanationZh": "末句总结健康土壤不是单一行动的结果，而是一系列知情选择共同支持的。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "Healthy soil is not produced by a single action; it is supported by a set of informed choices."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "cet6-soil-life-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-15T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-15T09:30:00+08:00"
+}

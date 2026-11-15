@@ -7,6 +7,7 @@ from sqlalchemy import inspect, select, text
 from app.content import ContentService
 from app.content_store import ArticleVariant, ContentDatabase
 from app.exam_content import validate_exam_passage
+from app.exam_store import ExamContentStore
 from app.settings import Settings
 
 
@@ -213,3 +214,51 @@ def test_existing_sqlite_is_upgraded_and_regular_articles_stay_unscoped(tmp_path
         assert serialized["questions"] == []
         assert serialized["exam"] is None
         assert serialized["provenance"] is None
+
+
+def exam_database(tmp_path):
+    database = ContentDatabase(Settings(database_url=f"sqlite:///{tmp_path / 'exams.db'}"))
+    database.initialize()
+    return database
+
+
+def test_import_is_idempotent_and_list_filters_by_track(tmp_path):
+    store = ExamContentStore(exam_database(tmp_path))
+    imported = store.import_passage(valid_passage())
+    assert imported["id"] == valid_passage()["id"]
+    assert imported["examTrack"] == "cet4"
+    assert imported["questions"][0]["answer"] == "A"
+    assert imported["exam"]["year"] is None
+    assert store.import_passage(valid_passage())["id"] == imported["id"]
+    assert len(store.list("cet4")) == 1
+    assert store.list("cet6") == []
+
+
+def test_same_id_cannot_replace_article_body(tmp_path):
+    store = ExamContentStore(exam_database(tmp_path))
+    store.import_passage(valid_passage())
+    changed = valid_passage()
+    changed["paragraphs"][1] = "A different paragraph now describes an entirely different article."
+    with pytest.raises(ValueError, match="正文"):
+        store.import_passage(changed)
+    assert store.list()[0]["paragraphs"] == valid_passage()["paragraphs"]
+
+
+def test_invalid_batch_rolls_back_every_article(tmp_path):
+    store = ExamContentStore(exam_database(tmp_path))
+    second = valid_passage()
+    second["id"] = "cet6-garden-story-original"
+    second["examTrack"] = "cet6"
+    second["questions"][0]["evidenceSentence"] = "This sentence is absent from the article."
+    with pytest.raises(ValueError, match="q1"):
+        store.import_passages([valid_passage(), second])
+    assert store.list() == []
+
+
+def test_only_approved_exam_articles_appear_in_catalog(tmp_path):
+    database = exam_database(tmp_path)
+    store = ExamContentStore(database)
+    imported = store.import_passage(valid_passage())
+    with database.session() as session:
+        session.get(ArticleVariant, imported["id"]).review_status = "review"
+    assert store.list() == []

@@ -1,0 +1,68 @@
+{
+  "id": "postgraduate-helpful-maps-original",
+  "title": "When Helpful Maps Narrow Our Choices",
+  "author": "苏打阅读编辑部",
+  "topic": "科技",
+  "cefr": "C1",
+  "publishedAt": "2026-11-15T08:00:00+08:00",
+  "introZh": "思考导航工具带来便利时，效率是否也会悄然缩小我们的选择范围。",
+  "paragraphs": [
+    "Digital maps are designed to reduce uncertainty. They compare routes, estimate delays, and offer a clear answer to a practical question: how do I get there? Their value is obvious when time is limited or the destination is unfamiliar. Yet the clarity of a recommended route can conceal the assumptions behind it. A system optimized for speed may assign little importance to quiet streets, attractive views, or opportunities for discovery.",
+    "This does not mean that navigation tools make every journey worse. The concern is more subtle: a convenient recommendation can become a default that people stop questioning. A walker may follow a faster road without noticing a pleasant path nearby. Over time, repeated choices can make certain places feel familiar while others remain invisible, even when both are equally accessible.",
+    "A thoughtful response is neither to abandon maps nor to distrust every recommendation. It is to recognize that efficiency is one value among several. Some journeys benefit from the shortest route; others leave room for exploration. Users can occasionally compare alternatives, and designers can make the basis of recommendations easier to see. The aim is not less useful guidance, but guidance that leaves people aware of their choices."
+  ],
+  "examTrack": "postgraduate",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "What can a clear recommended route conceal?",
+      "options": ["The destination's location", "The cost of every digital device", "The assumptions used to rank routes", "The existence of all delays"],
+      "answer": "C",
+      "explanationZh": "第一段指出清晰路线可能掩盖其背后的假设，例如只优化速度而忽视其他价值。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "Yet the clarity of a recommended route can conceal the assumptions behind it."
+    },
+    {
+      "id": "q2",
+      "prompt": "What does the author identify as a subtle concern?",
+      "options": ["People may accept convenient defaults without questioning them", "Digital maps cannot work in unfamiliar places", "Walkers always prefer busy roads", "Technology makes travel impossible"],
+      "answer": "A",
+      "explanationZh": "作者担心的是便利推荐成为默认选项，使人们不再质疑，而非完全否定工具。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "The concern is more subtle: a convenient recommendation can become a default that people stop questioning."
+    },
+    {
+      "id": "q3",
+      "prompt": "What response does the author recommend?",
+      "options": ["Avoiding all digital maps", "Always choosing the slowest route", "Trusting every recommendation", "Recognizing efficiency as only one value"],
+      "answer": "D",
+      "explanationZh": "第三段主张把效率视为多种价值之一，而不是弃用地图或一味选择慢路线。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "It is to recognize that efficiency is one value among several."
+    },
+    {
+      "id": "q4",
+      "prompt": "How does the author suggest designers could help?",
+      "options": ["By hiding alternative routes", "By making recommendation criteria easier to understand", "By removing all time estimates", "By preventing users from comparing choices"],
+      "answer": "B",
+      "explanationZh": "作者建议设计者让推荐依据更容易被看见，以增强使用者对选择的认识。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "Users can occasionally compare alternatives, and designers can make the basis of recommendations easier to see."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "postgraduate-helpful-maps-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-15T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-15T09:30:00+08:00"
+}

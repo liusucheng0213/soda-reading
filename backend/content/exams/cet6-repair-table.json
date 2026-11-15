@@ -1,0 +1,68 @@
+{
+  "id": "cet6-repair-table-original",
+  "title": "The Repair Table",
+  "author": "苏打阅读编辑部",
+  "topic": "故事",
+  "cefr": "B2",
+  "publishedAt": "2026-11-15T08:00:00+08:00",
+  "introZh": "一张修理桌让退休工程师和少年重新理解技术、耐心与分享。",
+  "paragraphs": [
+    "Every Thursday, the community center set aside a long table for objects that people could not repair themselves. Nora, a retired engineer, volunteered there because she enjoyed solving practical problems. She was skilled, but she sometimes finished a repair before its owner understood what she had done. The object worked again, yet the person watching had learned very little.",
+    "One evening, Leo brought in a radio that had belonged to his grandmother. Nora immediately saw that a loose connection was probably responsible for the silence. Instead of taking the radio apart herself, she asked Leo to help her examine it. He held the light, compared the wires with a diagram, and slowly identified the broken connection. The repair took longer than Nora's usual work, but Leo followed every step.",
+    "When the radio finally played, Leo smiled not only because he could hear it. He understood why it had stopped and what had made it work again. Nora realized that the table could offer more than repaired objects. From then on, she placed an extra chair beside hers and began each session by asking, \"Would you like to try this with me?\""
+  ],
+  "examTrack": "cet6",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "What limitation did Nora notice in her earlier repairs?",
+      "options": ["She lacked basic engineering skills", "The owners often learned little while watching", "The center had no useful tools", "The objects were impossible to fix"],
+      "answer": "B",
+      "explanationZh": "第一段指出她常在看的人理解之前完成修理，物品恢复但对方学到很少。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "The object worked again, yet the person watching had learned very little."
+    },
+    {
+      "id": "q2",
+      "prompt": "Why did Leo's repair take longer than usual?",
+      "options": ["Nora could not find the problem", "The radio needed a new battery", "Nora guided him through the process", "Leo refused to touch the radio"],
+      "answer": "C",
+      "explanationZh": "Nora 让 Leo 参与照明、对照线路图和定位问题，因此比独自修理耗时更长。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "The repair took longer than Nora's usual work, but Leo followed every step."
+    },
+    {
+      "id": "q3",
+      "prompt": "What pleased Leo besides hearing the radio?",
+      "options": ["Understanding how it had been repaired", "Receiving a newer radio", "Finishing without doing any work", "Selling the radio to the center"],
+      "answer": "A",
+      "explanationZh": "Leo 不仅因为重新听到收音机而高兴，也因为理解了故障原因和修复过程。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "He understood why it had stopped and what had made it work again."
+    },
+    {
+      "id": "q4",
+      "prompt": "What does the extra chair symbolize at the end?",
+      "options": ["A rule against working alone", "A desire to finish repairs faster", "Nora's plan to retire again", "An invitation to participate and learn"],
+      "answer": "D",
+      "explanationZh": "额外的椅子配合邀请对方一起尝试，象征从替人修理转向邀请参与和学习。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "From then on, she placed an extra chair beside hers and began each session by asking, \"Would you like to try this with me?\""
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "cet6-repair-table-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-15T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-15T09:30:00+08:00"
+}

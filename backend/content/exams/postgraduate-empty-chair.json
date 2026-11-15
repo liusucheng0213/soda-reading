@@ -1,0 +1,68 @@
+{
+  "id": "postgraduate-empty-chair-original",
+  "title": "The Empty Chair at the Observatory",
+  "author": "苏打阅读编辑部",
+  "topic": "故事",
+  "cefr": "C1",
+  "publishedAt": "2026-11-15T08:00:00+08:00",
+  "introZh": "天文台里的一把空椅子，连接着个人怀念与公共记忆。",
+  "paragraphs": [
+    "When the town observatory reopened, visitors noticed an empty chair near the largest telescope. It looked out of place among the new instruments and polished displays. Eli, the young caretaker, considered moving it into storage, but a handwritten label on its back made him pause: \"Leave room for a question.\" No one on the staff could explain who had written it.",
+    "During the first public evening, an elderly woman named Ruth sat in the chair. She told Eli that her brother had once worked at the observatory and had welcomed visitors who knew nothing about astronomy. He believed that a beginner's question could improve an expert's explanation. The chair had been his way of inviting people to stay rather than simply look and leave.",
+    "Eli had planned to fill the evening with a detailed talk about the instruments. After hearing Ruth's story, he shortened his remarks and asked the visitors what they wanted to know. Their questions were simple at first, but they led to a lively discussion about distance, time, and uncertainty. Eli kept the chair where it was, not as a monument to one person, but as a reminder that knowledge grows through conversation."
+  ],
+  "examTrack": "postgraduate",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "Why did Eli hesitate to move the chair?",
+      "options": ["It contained a valuable instrument", "Its label suggested a purpose he did not yet understand", "The visitors had already sat down", "The storage room was locked"],
+      "answer": "B",
+      "explanationZh": "椅背上的手写话让 Eli 停下，因为它暗示了某种当时无人解释的目的。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "Eli, the young caretaker, considered moving it into storage, but a handwritten label on its back made him pause: \"Leave room for a question.\" No one on the staff could explain who had written it."
+    },
+    {
+      "id": "q2",
+      "prompt": "What did Ruth's brother believe about beginners' questions?",
+      "options": ["They could improve experts' explanations", "They wasted the time of astronomers", "They should be answered only in writing", "They proved that visitors lacked curiosity"],
+      "answer": "A",
+      "explanationZh": "Ruth 说明她哥哥认为初学者的问题能帮助专家改进解释。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "He believed that a beginner's question could improve an expert's explanation."
+    },
+    {
+      "id": "q3",
+      "prompt": "How did Eli change the public evening?",
+      "options": ["He canceled the discussion", "He gave a longer technical lecture", "He shortened his talk and invited questions", "He removed all the instruments"],
+      "answer": "C",
+      "explanationZh": "听完故事后 Eli 缩短讲解并邀请访客提问，使活动转向交流。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "After hearing Ruth's story, he shortened his remarks and asked the visitors what they wanted to know."
+    },
+    {
+      "id": "q4",
+      "prompt": "What does the chair represent by the end of the story?",
+      "options": ["The need to preserve old furniture", "A warning against scientific expertise", "The superiority of formal lectures", "The value of conversation in developing knowledge"],
+      "answer": "D",
+      "explanationZh": "末句将椅子的意义落在对话促进知识增长，而不是纪念家具或否定专业知识。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "Eli kept the chair where it was, not as a monument to one person, but as a reminder that knowledge grows through conversation."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "postgraduate-empty-chair-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-15T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-15T09:30:00+08:00"
+}

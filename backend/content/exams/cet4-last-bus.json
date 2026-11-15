@@ -1,0 +1,68 @@
+{
+  "id": "cet4-last-bus-original",
+  "title": "The Last Bus Home",
+  "author": "苏打阅读编辑部",
+  "topic": "故事",
+  "cefr": "B1",
+  "publishedAt": "2026-11-15T08:00:00+08:00",
+  "introZh": "错过末班车后，一次意外的帮助让陌生人成为朋友。",
+  "paragraphs": [
+    "Maya reached the bus stop just as the last bus turned the corner. Her phone had no power, and the walk home would take more than an hour. She sat on the bench, wondering what to do. Across the street, Mr. Bell was closing his small bakery.",
+    "Mr. Bell noticed Maya and asked if she needed help. When she explained her situation, he offered to let her charge her phone inside. While they waited, he showed her an old photograph of the bakery. Maya recognized the man beside Mr. Bell in the picture. It was her grandfather, who had once delivered flour to the shop.",
+    "The discovery changed their quiet wait into a long conversation. When Maya's phone finally turned on, she called her brother and arranged a ride home. Before leaving, she promised to visit the bakery again. The next Saturday, she arrived with an old recipe book that had belonged to her grandfather."
+  ],
+  "examTrack": "cet4",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "Why was Maya worried at the bus stop?",
+      "options": ["She had lost her job", "She had missed the bus and could not use her phone", "She could not find the bakery", "She was late for school"],
+      "answer": "B",
+      "explanationZh": "第一段说明她错过末班车，手机没电，步行回家又很远。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "Her phone had no power, and the walk home would take more than an hour."
+    },
+    {
+      "id": "q2",
+      "prompt": "What did Mr. Bell offer to do?",
+      "options": ["Drive her home", "Repair her phone", "Let her charge her phone in the bakery", "Call her grandfather"],
+      "answer": "C",
+      "explanationZh": "Mr. Bell 让她进店给手机充电，而不是提供车辆或修手机。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "When she explained her situation, he offered to let her charge her phone inside."
+    },
+    {
+      "id": "q3",
+      "prompt": "What did Maya discover in the photograph?",
+      "options": ["Her grandfather had known the baker", "Her brother owned the bakery", "Mr. Bell was her teacher", "The bakery was going to close forever"],
+      "answer": "A",
+      "explanationZh": "照片里站在 Mr. Bell 旁边的是她祖父，祖父曾给店里送面粉。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "It was her grandfather, who had once delivered flour to the shop."
+    },
+    {
+      "id": "q4",
+      "prompt": "What does Maya's visit on Saturday suggest?",
+      "options": ["She wants to buy a new phone", "She has forgotten her grandfather", "She wants to catch an earlier bus", "She values the new connection with Mr. Bell"],
+      "answer": "D",
+      "explanationZh": "她按约带着祖父的食谱再次来访，表明她珍视这段新建立的联系。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "The next Saturday, she arrived with an old recipe book that had belonged to her grandfather."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "cet4-last-bus-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-15T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-15T09:30:00+08:00"
+}
