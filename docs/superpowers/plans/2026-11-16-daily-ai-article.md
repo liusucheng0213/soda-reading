@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-13-lightweight-personal-reader-design.md`（第 8–10 节、阶段 5–6）
 
+**Execution status:** 任务 1–4 已完成；任务 5 的自动化、真实假模型、离线、审查和文档已完成。桌面、手机、键盘与目录回归已做，但真实设备听读和 reduced-motion 复核仍未完成，因此不将阶段 6 标为全部完成。
+
 ## Global Constraints
 
 - 默认 `PAID_PROVIDER_ENABLED=false`、`DAILY_PAID_BUDGET_CNY=0`；每日文章只能走 `daily_article` 路由和既有预算预留，不绕过付费总开关、单日预算或单次上限。

@@ -159,4 +159,4 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 `/admin/providers` 展示配置、阻断和运行状态，`/admin/providers/config` 分别保存 `translation`、`content_moderation`、`daily_article` 的线路顺序，`/admin/translation` 展示任务用量、缓存与付费保护；接口不会返回完整密钥。云端翻译记忆同时保存在后端内存和本机 `model_center.db`，相同并发请求会合并，重启后仍可复用。管理端可通过 `DELETE /admin/translation/cache` 清理翻译缓存，其他数据不受影响。
 
-用量按任务区分供应商报告 token 与本地估算 token，费用为预算估算而非账单。内容审核路由目前只保存配置，AI 审核和读者端每日文章入口不在本阶段。
+用量按任务区分供应商报告 token 与本地估算 token，费用为预算估算而非账单。内容审核已使用规则优先的有界 AI 边界审核。读者端每日 AI 文章只在明确确认后使用 `daily_article` 路由，同日持久缓存与历史目录不会重复生成；失败、刷新、修改参数或读取状态都不会绕过付费护栏或自动重试。
