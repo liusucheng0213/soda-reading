@@ -1051,3 +1051,60 @@ async def test_new_government_sources_downgrade_external_and_restricted_text(sou
     assert all(candidate.full_text_allowed is False for candidate in candidates)
     assert all("paragraphs" not in candidate.metadata for candidate in candidates)
     assert "https://third-party.example/story" not in requested_urls
+
+
+def test_editorial_claims_require_exact_relevant_excerpts_and_matching_numbers():
+    provider = EditorialProvider("zhipu", "https://example.test", "free-model", "test-key")
+    evidence = [{
+        "title": "Wetland study",
+        "summary": "Researchers measured 12 wetland changes across three seasons. The weather remained calm.",
+    }]
+
+    def result(sentence, excerpt="Researchers measured 12 wetland changes"):
+        paragraphs = [
+            f"{sentence} " + "Readers can understand the careful research process. " * 10,
+            "The article explains the evidence in clear and connected language. " * 10,
+            "The conclusion returns to the main idea and explains its limits. " * 10,
+        ]
+        return {
+            "title": "A Traceable Research Finding",
+            "summaryZh": "一篇有精确证据摘录的学习导读。",
+            "paragraphs": paragraphs,
+            "factClaims": [{
+                "sentence": sentence,
+                "evidenceIndexes": [0],
+                "evidenceExcerpts": [{"evidenceIndex": 0, "excerpt": excerpt}],
+            }],
+        }
+
+    valid = EditorialGateway._validate(
+        result("Researchers measured 12 wetland changes."),
+        provider,
+        "A2",
+        1,
+        evidence=evidence,
+    )
+    assert valid["factClaims"][0]["evidenceExcerpts"][0]["evidenceIndex"] == 0
+
+    with pytest.raises(ValueError, match="number|evidence|excerpt"):
+        EditorialGateway._validate(
+            result("Researchers measured 99 wetland changes."),
+            provider,
+            "A2",
+            1,
+            evidence=evidence,
+        )
+
+    with pytest.raises(ValueError, match="excerpt|evidence"):
+        EditorialGateway._validate(
+            result("Researchers measured 12 wetland changes.", excerpt="The weather remained calm."),
+            provider,
+            "A2",
+            1,
+            evidence=evidence,
+        )
+
+    missing = result("Researchers measured 12 wetland changes.")
+    del missing["factClaims"][0]["evidenceExcerpts"]
+    with pytest.raises(ValueError, match="excerpt|evidence"):
+        EditorialGateway._validate(missing, provider, "A2", 1, evidence=evidence)

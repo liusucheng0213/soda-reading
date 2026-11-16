@@ -15,6 +15,7 @@ from app.content_store import (
     ContentCandidate,
     ContentDatabase,
     DailyArticleRecord,
+    FactClaim,
     SourcePolicyRecord,
 )
 from app.daily_article import DailyArticleStore, daily_article_word_range
@@ -278,6 +279,10 @@ async def test_daily_generation_is_persistent_and_concurrent_requests_share_one_
     assert cached["article"]["id"] == first["article"]["id"]
     assert cached["request"] == valid_request()
     assert len(gateway.calls) == 1
+    with database.session() as session:
+        claim = session.scalar(select(FactClaim))
+        assert claim.verified is False
+        assert claim.evidence_locator.startswith("daily-ai:evidence[0]")
 
 
 @pytest.mark.asyncio
@@ -369,3 +374,89 @@ async def test_stale_generation_becomes_a_safe_failure_without_retry(tmp_path):
     assert store.today()["error"] == "GENERATION_INTERRUPTED"
     assert (await store.generate(valid_request()))["status"] == "failed"
     assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_generation_preserves_its_reserved_day_across_shanghai_midnight(tmp_path):
+    database = daily_database(tmp_path)
+    seed_three_sources(database)
+    clock = {"now": datetime(2026, 11, 15, 15, 59, 50, tzinfo=timezone.utc)}
+    started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    class CrossMidnightGateway(FakeDailyGateway):
+        async def generate(self, topic, level, evidence, **kwargs):
+            self.calls.append({"topic": topic, "level": level, "evidence": evidence, **kwargs})
+            if len(self.calls) == 1:
+                started.set()
+                await release_first.wait()
+            return deepcopy(self.result)
+
+    gateway = CrossMidnightGateway()
+    previous_store = DailyArticleStore(database, gateway, clock=lambda: clock["now"])
+    next_store = DailyArticleStore(database, gateway, clock=lambda: clock["now"])
+    previous_task = asyncio.create_task(previous_store.generate(valid_request()))
+    await started.wait()
+
+    clock["now"] = datetime(2026, 11, 15, 16, 0, 10, tzinfo=timezone.utc)
+    next_state = await next_store.generate(valid_request())
+    release_first.set()
+    previous_state = await previous_task
+
+    assert next_state["date"] == "2026-11-16"
+    assert previous_state["date"] == "2026-11-15"
+    assert previous_state["status"] == next_state["status"] == "ready"
+    assert previous_state["article"]["id"] != next_state["article"]["id"]
+    assert len(gateway.calls) == 2
+    with database.session() as session:
+        records = list(session.scalars(select(DailyArticleRecord)))
+        assert len(records) == 2
+        assert all(record.status == "ready" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_history_keeps_previous_days_article_readable(tmp_path):
+    database = daily_database(tmp_path)
+    seed_three_sources(database)
+    clock = {"now": FIXED_NOW}
+    gateway = FakeDailyGateway()
+    store = DailyArticleStore(database, gateway, clock=lambda: clock["now"])
+    generated = await store.generate(valid_request())
+
+    clock["now"] = FIXED_NOW + timedelta(days=1)
+
+    assert store.today()["status"] == "empty"
+    history = store.history()
+    assert len(history) == 1
+    assert history[0]["id"] == generated["article"]["id"]
+    assert history[0]["paragraphs"]
+    assert history[0]["contentMode"] == "daily_ai"
+
+
+@pytest.mark.asyncio
+async def test_daily_article_rejects_cefr_metric_mismatch(tmp_path):
+    database = daily_database(tmp_path)
+    seed_three_sources(database)
+    result = generated_result()
+    result["wordCount"] = 180
+    result["paragraphs"] = [
+        "Although interconnected methodological considerations significantly complicate straightforward interpretation, "
+        "the researchers contextualize heterogeneous environmental observations within elaborate theoretical frameworks "
+        "and cautiously evaluate contradictory evidence before presenting their nuanced conclusions.",
+        "Whereas numerous interconnected variables substantially influence longitudinal ecological transformations, "
+        "careful investigators systematically differentiate correlation from causation through sophisticated analytical "
+        "procedures and explicitly acknowledge persistent methodological limitations.",
+        "Consequently, comprehensive interpretation necessitates meticulous consideration of interconnected biological "
+        "processes, heterogeneous environmental conditions, and sophisticated statistical uncertainties before any "
+        "responsible generalized recommendations can be formulated.",
+    ]
+    gateway = FakeDailyGateway(result=result)
+    store = DailyArticleStore(database, gateway, clock=lambda: FIXED_NOW)
+
+    failed = await store.generate({**valid_request(), "cefr": "A1", "length": "short"})
+
+    assert failed["status"] == "failed"
+    assert failed["article"] is None
+    assert failed["error"] == "CEFR_MISMATCH"
+    with database.session() as session:
+        assert session.scalar(select(func.count(ArticleVariant.id))) == 0

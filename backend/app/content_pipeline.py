@@ -1044,7 +1044,7 @@ class ContentPipeline:
                                 source_url=source["url"],
                                 source_label=source["source"],
                                 evidence_locator=f"editorial-claim:evidence[{evidence_index}]",
-                                verified=True,
+                                verified=False,
                             ))
                 generated += 1
         return generated

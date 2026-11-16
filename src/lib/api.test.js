@@ -244,3 +244,21 @@ describe("daily AI article API", () => {
     expect(JSON.parse(options.body)).toEqual(payload);
   });
 });
+
+
+describe("daily AI history API", () => {
+  it("loads readable historical articles without generating", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: [{ id: "yesterday-ai", paragraphs: ["Readable."] }] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getDailyAiHistory } = await import("./api.js");
+    const result = await getDailyAiHistory();
+    expect(result.items[0].id).toBe("yesterday-ai");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/daily-ai/history");
+    expect(fetchMock.mock.calls[0][1].method).toBeUndefined();
+  });
+});

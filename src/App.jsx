@@ -23,7 +23,7 @@ import {
   topicOptions,
   typefaceOptions,
 } from "./data.js";
-import { generateDailyAi, getDailyAiToday, getDailyFeed, getExamCatalog, saveProfile } from "./lib/api.js";
+import { generateDailyAi, getDailyAiHistory, getDailyAiToday, getDailyFeed, getExamCatalog, saveProfile } from "./lib/api.js";
 import { EXAM_TRACK_LABELS, examOriginLabel, filterExamArticles } from "./lib/exams.js";
 import { DEFAULT_LOCAL_PROFILE, normalizeProfile } from "./lib/profile.js";
 import { dueCards } from "@soda-reading/core";
@@ -131,6 +131,7 @@ function SodaApp() {
   const [placement, setPlacement] = useAccountState(accountName, "placement", null);
   const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives, fallback: true });
   const [dailyAiState, setDailyAiState] = useState(null);
+  const [dailyAiHistory, setDailyAiHistory] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [examCatalog, setExamCatalog] = useState([]);
   const [examError, setExamError] = useState(null);
@@ -156,6 +157,7 @@ function SodaApp() {
     const shown = displayFeed(feed, profile, fallbackLibrary);
     const catalog = uniqueArticles([
       generatedDailyArticle,
+      ...dailyAiHistory,
       shown.primary,
       ...(shown.alternatives ?? []),
       ...fallbackLibrary,
@@ -165,7 +167,7 @@ function SodaApp() {
     const next = resumeFromProgress(catalog, progress, resume);
     if (!next?.id || next.id === resume?.id) return;
     setResume(next);
-  }, [feed, profile, examCatalog, documents, progress, resume, generatedDailyArticle]);
+  }, [feed, profile, examCatalog, documents, progress, resume, generatedDailyArticle, dailyAiHistory]);
 
   useEffect(() => {
     let active = true;
@@ -183,6 +185,16 @@ function SodaApp() {
       if (active) setDailyAiState(next);
     }).catch(() => {
       if (active) setDailyAiState({ status: "failed", article: null, error: "NETWORK_ERROR" });
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getDailyAiHistory().then((result) => {
+      if (active) setDailyAiHistory(result.items ?? []);
+    }).catch(() => {
+      if (active) setDailyAiHistory([]);
     });
     return () => { active = false; };
   }, []);
@@ -211,6 +223,9 @@ function SodaApp() {
   const confirmDailyAi = async (preferences) => {
     const next = await generateDailyAi(preferences);
     setDailyAiState(next);
+    if (next.article?.paragraphs?.length) {
+      setDailyAiHistory((current) => uniqueArticles([next.article, ...current]));
+    }
     return next;
   };
 
@@ -372,6 +387,7 @@ function SodaApp() {
   const shownFeed = displayFeed(feed, profile, fallbackLibrary);
   const catalog = uniqueArticles([
     generatedDailyArticle,
+    ...dailyAiHistory,
     shownFeed.primary,
     ...(shownFeed.alternatives ?? []),
     ...fallbackLibrary,
@@ -405,7 +421,7 @@ function SodaApp() {
         {screen === "library" && (
           <LibraryScreen
             documents={documents}
-            catalog={uniqueArticles([generatedDailyArticle, shownFeed.primary, ...(shownFeed.alternatives ?? []), ...fallbackLibrary])}
+            catalog={uniqueArticles([generatedDailyArticle, ...dailyAiHistory, shownFeed.primary, ...(shownFeed.alternatives ?? []), ...fallbackLibrary])}
             examCatalog={examCatalog}
             examError={examError}
             progress={progress}

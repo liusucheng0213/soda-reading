@@ -45,6 +45,10 @@ class DailyArticleEvidenceUnavailable(RuntimeError):
     pass
 
 
+class DailyArticleCefrMismatch(RuntimeError):
+    pass
+
+
 class DailyArticleStore:
     def __init__(self, database: ContentDatabase, gateway, clock=None):
         self.database = database
@@ -92,6 +96,19 @@ class DailyArticleStore:
             record = session.get(DailyArticleRecord, (user_id, self._day()))
             self._expire_stale(session, record)
             return self._response(record, session)
+
+    def history(self, user_id: str = "local-user") -> list[dict]:
+        with self.database.session() as session:
+            articles = list(session.scalars(
+                select(ArticleVariant)
+                .join(DailyArticleRecord, DailyArticleRecord.article_id == ArticleVariant.id)
+                .where(
+                    DailyArticleRecord.user_id == user_id,
+                    DailyArticleRecord.status == "ready",
+                )
+                .order_by(DailyArticleRecord.generation_date.desc())
+            ))
+            return [ContentService._article_dict(article, 100) for article in articles]
 
     def evidence_for(self, interest: str) -> list[dict]:
         with self.database.session() as session:
@@ -186,34 +203,42 @@ class DailyArticleStore:
                     form=payload.form,
                     word_range=daily_article_word_range(payload.cefr, payload.length),
                 )
-                return self._save_success(user_id, payload, evidence, result)
+                return self._save_success(user_id, day, payload, evidence, result)
             except asyncio.CancelledError:
-                self._fail(user_id, "GENERATION_CANCELLED")
+                self._fail(user_id, day, "GENERATION_CANCELLED")
                 raise
             except DailyArticleEvidenceUnavailable:
-                self._fail(user_id, "INSUFFICIENT_EVIDENCE")
+                self._fail(user_id, day, "INSUFFICIENT_EVIDENCE")
+            except DailyArticleCefrMismatch:
+                self._fail(user_id, day, "CEFR_MISMATCH")
             except EditorialUnavailable:
-                self._fail(user_id, "MODEL_UNAVAILABLE")
+                self._fail(user_id, day, "MODEL_UNAVAILABLE")
             except (asyncio.TimeoutError, TimeoutError):
-                self._fail(user_id, "GENERATION_TIMEOUT")
+                self._fail(user_id, day, "GENERATION_TIMEOUT")
             except Exception:
-                self._fail(user_id, "GENERATION_FAILED")
+                self._fail(user_id, day, "GENERATION_FAILED")
             return self.today(user_id)
 
-    def _fail(self, user_id: str, code: str) -> None:
+    def _fail(self, user_id: str, generation_day, code: str) -> None:
         with self.database.session() as session:
-            record = session.get(DailyArticleRecord, (user_id, self._day()))
+            record = session.get(DailyArticleRecord, (user_id, generation_day))
             if record is not None and record.status == "generating":
                 record.status = "failed"
                 record.error = code
                 record.updated_at = self._now()
 
-    def _save_success(self, user_id: str, request: DailyArticleRequest, evidence: list[dict], result: dict) -> dict:
+    def _save_success(self, user_id: str, generation_day, request: DailyArticleRequest, evidence: list[dict], result: dict) -> dict:
         now = self._now()
-        day = self._day()
+        day = generation_day
         article_id = str(uuid5(NAMESPACE_URL, f"soda-reading:daily-ai:{user_id}:{day}"))
         cluster_id = str(uuid5(NAMESPACE_URL, f"soda-reading:daily-ai-cluster:{user_id}:{day}"))
         body_hash = hashlib.sha256("\n\n".join(result["paragraphs"]).encode()).hexdigest()
+        metrics = difficulty_metrics(result["paragraphs"])
+        level_order = list(LEVEL_TARGETS)
+        level_distance = abs(level_order.index(request.cefr) - level_order.index(metrics["estimatedCefr"]))
+        if level_distance > 1:
+            raise DailyArticleCefrMismatch
+        quality_score = 90 - level_distance * 5
         source_date = max(
             datetime.fromisoformat(str(item["publishedAt"]).replace("Z", "+00:00"))
             for item in evidence
@@ -254,8 +279,8 @@ class DailyArticleStore:
                     "peer_reviewed" if any(item["peerReviewStatus"] == "peer_reviewed" for item in evidence)
                     else "not_applicable"
                 ),
-                quality_score=90,
-                difficulty_metrics=difficulty_metrics(result["paragraphs"]),
+                quality_score=quality_score,
+                difficulty_metrics=metrics,
                 source_published_at=source_date,
                 sources=[{
                     "label": item["source"],
@@ -283,7 +308,7 @@ class DailyArticleStore:
                         source_url=source["url"],
                         source_label=source["source"],
                         evidence_locator=f"daily-ai:evidence[{evidence_index}]",
-                        verified=True,
+                        verified=False,
                     ))
             record.status = "ready"
             record.article_id = article_id

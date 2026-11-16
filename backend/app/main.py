@@ -84,6 +84,11 @@ async def daily_ai_today() -> dict:
     return daily_article_store.today()
 
 
+@app.get("/daily-ai/history")
+async def daily_ai_history() -> dict:
+    return {"items": daily_article_store.history()}
+
+
 @app.post("/daily-ai/generate")
 async def daily_ai_generate(payload: DailyArticleRequest) -> dict:
     return await daily_article_store.generate(payload)

@@ -606,7 +606,11 @@ def install_daily_ai_api_store(monkeypatch, tmp_path, error=None):
             return {
                 "title": "A Traceable Daily Article",
                 "summary": "一篇有来源的每日文章。",
-                "paragraphs": ["One complete opening paragraph.", "Another connected paragraph.", "A final paragraph."],
+                "paragraphs": [
+                    "Local helpers compare wetland records and explain notes to people each season.",
+                    "Patient helpers compare wetland records and discuss notes with people each week.",
+                    "Kind helpers share wetland records and explain their notes to local readers.",
+                ],
                 "wordCount": 12,
                 "factClaims": [],
                 "sentenceTranslations": {},
@@ -648,7 +652,7 @@ def test_daily_ai_api_generates_only_after_confirmation_and_reuses_the_day(monke
     first = client.post("/daily-ai/generate", json=payload)
     second = client.post("/daily-ai/generate", json={**payload, "cefr": "C2"})
     assert first.status_code == second.status_code == 200
-    assert first.json()["status"] == second.json()["status"] == "ready"
+    assert first.json()["status"] == second.json()["status"] == "ready", first.json()
     assert first.json()["article"]["id"] == second.json()["article"]["id"]
     assert len(gateway.calls) == 1
 
@@ -666,3 +670,14 @@ def test_daily_ai_api_returns_safe_failure_without_traceback(monkeypatch, tmp_pa
     assert response.json()["article"] is None
     assert "private provider details" not in response.text
     assert len(gateway.calls) == 1
+
+
+def test_daily_ai_history_api_returns_generated_articles(monkeypatch, tmp_path):
+    install_daily_ai_api_store(monkeypatch, tmp_path)
+    created = client.post("/daily-ai/generate", json={
+        "interest": "自然", "form": "science", "length": "medium", "cefr": "B1",
+    })
+    response = client.get("/daily-ai/history")
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [created.json()["article"]["id"]]
+    assert response.json()["items"][0]["paragraphs"]

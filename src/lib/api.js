@@ -180,6 +180,10 @@ export async function getDailyAiToday() {
   return request("/daily-ai/today", { timeout: 4000 });
 }
 
+export async function getDailyAiHistory() {
+  return request("/daily-ai/history", { timeout: 6000 });
+}
+
 export async function generateDailyAi(payload, { signal } = {}) {
   return request("/daily-ai/generate", {
     method: "POST",
