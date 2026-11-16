@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DailyAiPanel } from "../screens/DailyAiPanel.jsx";
+import { DailyAiPanel, dailyAiArticle } from "../screens/DailyAiPanel.jsx";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -92,6 +92,24 @@ describe("daily AI confirmation panel", () => {
     expect(container.textContent).toContain("下面的今日阅读");
     expect(container.textContent).not.toContain("确认生成");
     expect(container.textContent).not.toContain("重新生成");
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("daily AI reading boundaries", () => {
+  it("only exposes a ready article with a readable body to the shared catalog", () => {
+    const article = { id: "daily-ai-body", paragraphs: ["A complete paragraph."] };
+    expect(dailyAiArticle({ status: "ready", article })).toBe(article);
+    expect(dailyAiArticle({ status: "ready", article: { id: "empty", paragraphs: [] } })).toBeNull();
+    expect(dailyAiArticle({ status: "failed", article: null })).toBeNull();
+    expect(dailyAiArticle({ status: "empty", article: null })).toBeNull();
+  });
+
+  it("does not show an active confirmation before the initial status arrives", async () => {
+    const { onGenerate } = await render({ state: null });
+    expect(container.textContent).toContain("正在读取");
+    expect(submitButton()).toBeNull();
     expect(onGenerate).not.toHaveBeenCalled();
   });
 });

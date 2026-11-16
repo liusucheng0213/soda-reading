@@ -114,6 +114,18 @@ body {
 .settings-help { margin: 0 0 12px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 .profile-topics { margin: 4px 0 8px; }
 
+.daily-ai-panel { padding: 18px 0 22px; border-block: 1px solid var(--hairline); }
+.daily-ai-panel + .featured-reading { border-top: 0; }
+.daily-ai-panel h2 { margin: 12px 0; font: 500 26px/1.15 "Newsreader", "Noto Serif SC", serif; }
+.daily-ai-panel > p, .daily-ai-panel form > p { color: var(--text-muted); font-size: 13px; line-height: 1.65; }
+.daily-ai-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0 14px; }
+.daily-ai-settings label { min-width: 0; display: grid; gap: 7px; color: var(--text-muted); font-size: 11px; }
+.daily-ai-settings select { width: 100%; min-width: 0; min-height: 44px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: 0; background: var(--surface-strong); color: var(--text); }
+.daily-ai-submit { width: 100%; border-radius: 0; background: transparent; border: 1px solid var(--mint-deep); color: var(--mint-deep); }
+.daily-ai-submit:disabled { border-color: var(--hairline); color: var(--text-muted); }
+.daily-ai-note { margin: 10px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.55; }
+.daily-ai-panel.ready > p { max-width: 42em; margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.7; }
+
 .featured-reading { padding: 22px 0 28px; border-block: 1px solid var(--hairline); }
 .article-meta { display: flex; gap: 14px; color: var(--mint-deep); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
 .article-meta span + span::before { content: "·"; margin-right: 14px; color: var(--text-muted); }
@@ -663,6 +675,8 @@ body {
   .screen { width: min(100%, 900px); margin-inline: auto; padding: 48px 56px 64px; }
   .screen-header { margin-bottom: 34px; }
   .screen-header h1 { font-size: 38px; }
+  .daily-ai-settings { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .daily-ai-submit { width: auto; min-width: 160px; }
   .featured-reading { padding-block: 34px; }
   .featured-reading h2 { max-width: 700px; font-size: 44px; }
   .article-list { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }

@@ -14,6 +14,10 @@ const LENGTH_OPTIONS = [
   { value: "long", label: "长一点" },
 ];
 
+export function dailyAiArticle(state) {
+  return state?.status === "ready" && state.article?.paragraphs?.length ? state.article : null;
+}
+
 export function DailyAiPanel({ profile, state, onGenerate, onOpen }) {
   const [preferences, setPreferences] = useState(() => ({
     interest: profile.topics?.[0] || "科技",
@@ -53,6 +57,16 @@ export function DailyAiPanel({ profile, state, onGenerate, onOpen }) {
       setPending(false);
     }
   };
+
+  if (!state) {
+    return (
+      <section className="daily-ai-panel" aria-labelledby="daily-ai-title">
+        <div className="article-meta"><span>今日 AI 文章</span></div>
+        <h2 id="daily-ai-title">正在读取今日文章</h2>
+        <p role="status">普通今日阅读仍可正常使用。</p>
+      </section>
+    );
+  }
 
   if (status === "ready" && article) {
     return (
