@@ -8,12 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from .content import ContentService
 from .content_editorial import EditorialGateway
 from .content_moderation import ContentModerationGateway
+from .daily_article import DailyArticleStore
 from .exam_store import ExamContentStore
 from .model_center import MODEL_CENTER_PATH, ModelCenterStore
 from .provider_config import public_config, save_overrides
 from .schemas import (
     ArticleReviewRequest,
     ContentRunRequest,
+    DailyArticleRequest,
     Preferences,
     ProviderConfigRequest,
     TranslationRequest,
@@ -29,6 +31,7 @@ content_service = ContentService(settings, model_store=model_store)
 exam_store = ExamContentStore(content_service.database)
 content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
 content_service.pipeline.moderation = ContentModerationGateway(settings, store=model_store)
+daily_article_store = DailyArticleStore(content_service.database, content_service.pipeline.editorial)
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,6 +77,16 @@ async def feed(
 ) -> dict:
     preferences = Preferences(level=level, track=track, topics=topics)
     return content_service.daily_feed(preferences.model_dump(), "local-user")
+
+
+@app.get("/daily-ai/today")
+async def daily_ai_today() -> dict:
+    return daily_article_store.today()
+
+
+@app.post("/daily-ai/generate")
+async def daily_ai_generate(payload: DailyArticleRequest) -> dict:
+    return await daily_article_store.generate(payload)
 
 
 @app.post("/translations/word")
@@ -138,6 +151,7 @@ async def admin_save_provider_config(payload: ProviderConfigRequest) -> dict:
     gateway = TranslationGateway(settings, store=model_store)
     content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
     content_service.pipeline.moderation = ContentModerationGateway(settings, store=model_store)
+    daily_article_store.gateway = content_service.pipeline.editorial
     return {"saved": True, "config": public_config(), "providers": gateway.provider_status()}
 
 

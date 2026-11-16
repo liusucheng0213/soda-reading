@@ -214,3 +214,33 @@ describe("daily track API", () => {
     expect(fetchMock.mock.calls[0][0]).toContain("track=high_school");
   });
 });
+
+
+describe("daily AI article API", () => {
+  it("reads status without preferences and posts them only for explicit generation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "empty", article: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ready", article: { id: "daily-ai-1" } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const { getDailyAiToday, generateDailyAi } = await import("./api.js");
+
+    await expect(getDailyAiToday()).resolves.toMatchObject({ status: "empty" });
+    expect(fetchMock.mock.calls[0][0]).toContain("/daily-ai/today");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("interest=");
+
+    const payload = { interest: "历史", form: "story", length: "long", cefr: "C1" };
+    await expect(generateDailyAi(payload)).resolves.toMatchObject({ status: "ready" });
+    const [url, options] = fetchMock.mock.calls[1];
+    expect(url).toContain("/daily-ai/generate");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual(payload);
+  });
+});
