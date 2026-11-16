@@ -25,6 +25,12 @@ LEVEL_TARGETS = {
     "C2": (800, 1000, "Use sophisticated natural English, implicit meaning, subtle evaluation, and complex ideas without simplifying the argument."),
 }
 
+FORM_INSTRUCTIONS = {
+    "story": "Form: story. Write an original narrative grounded only in the evidence; never invent factual claims.",
+    "science": "Form: science. Explain the evidence as a clear, accurate science article with limitations and context.",
+    "explainer": "Form: explainer. Write a clear general-interest explanation with a connected opening, body and conclusion.",
+}
+
 
 class EditorialUnavailable(RuntimeError):
     pass
@@ -168,9 +174,23 @@ class EditorialGateway:
             "daily_article", provider.name, provider.model, False, 0, 0, False, 0,
         )
 
-    async def generate(self, topic: str, level: str, evidence: list[dict[str, Any]]) -> dict:
+    async def generate(
+        self,
+        topic: str,
+        level: str,
+        evidence: list[dict[str, Any]],
+        *,
+        form: str = "explainer",
+        word_range: tuple[int, int] | None = None,
+    ) -> dict:
         if level not in LEVEL_TARGETS:
             raise ValueError(f"Unsupported CEFR level: {level}")
+        if form not in FORM_INSTRUCTIONS:
+            raise ValueError(f"Unsupported article form: {form}")
+        if word_range is not None and (
+            len(word_range) != 2 or word_range[0] <= 0 or word_range[1] < word_range[0]
+        ):
+            raise ValueError("Invalid article word range")
         started = time.monotonic()
         for provider in self._ranked_providers():
             if not provider.configured or self.cooldown_until.get(provider.name, 0) > time.monotonic():
@@ -183,7 +203,7 @@ class EditorialGateway:
             result = None
             try:
                 result = await asyncio.wait_for(
-                    self._call(provider, topic, level, evidence),
+                    self._call(provider, topic, level, evidence, form=form, word_range=word_range),
                     timeout=timeout,
                 )
                 validated = self._validate(
@@ -192,6 +212,7 @@ class EditorialGateway:
                     level,
                     len(evidence[:4]),
                     require_learning_assets=True,
+                    word_range=word_range,
                 )
                 metric = self.metrics[provider.name]
                 metric["successes"] += 1
@@ -401,8 +422,13 @@ class EditorialGateway:
         topic: str,
         level: str,
         evidence: list[dict[str, Any]],
+        *,
+        form: str = "explainer",
+        word_range: tuple[int, int] | None = None,
     ) -> dict:
         minimum, maximum, level_instruction = LEVEL_TARGETS[level]
+        if word_range is not None:
+            minimum, maximum = word_range
         compact_evidence = [
             {
                 "title": item.get("title", ""),
@@ -416,6 +442,7 @@ class EditorialGateway:
         ]
         system = (
             "You are the editorial writer for Soda Reading, an English learning reader. "
+            f"{FORM_INSTRUCTIONS[form]} "
             "Write an original, self-contained English learning article based ONLY on the supplied evidence. "
             "Do not imitate or claim to be the source publication. Do not invent numbers, causes, quotations, "
             "dates, methods, or conclusions. Explain uncertainty and study limitations. The article must have "
@@ -432,6 +459,7 @@ class EditorialGateway:
         )
         user = {
             "topic": topic,
+            "form": form,
             "targetCefr": level,
             "wordRange": [minimum, maximum],
             "levelGuidance": level_instruction,
@@ -478,6 +506,7 @@ class EditorialGateway:
         level: str,
         evidence_count: int,
         require_learning_assets: bool = False,
+        word_range: tuple[int, int] | None = None,
     ) -> dict:
         title = str(result.get("title", "")).strip()
         summary = str(result.get("summaryZh", "")).strip()
@@ -488,7 +517,7 @@ class EditorialGateway:
         if len(paragraphs) < 3:
             raise ValueError("Editorial article has no complete argument structure")
         word_count = len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", " ".join(paragraphs)))
-        minimum, maximum, _ = LEVEL_TARGETS[level]
+        minimum, maximum = word_range or LEVEL_TARGETS[level][:2]
         if word_count < minimum or word_count > maximum:
             raise ValueError(f"Editorial article word count {word_count} is outside {minimum}-{maximum}")
         claims = result.get("factClaims")
