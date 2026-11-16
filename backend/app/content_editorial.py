@@ -25,6 +25,68 @@ LEVEL_TARGETS = {
     "C2": (800, 1000, "Use sophisticated natural English, implicit meaning, subtle evaluation, and complex ideas without simplifying the argument."),
 }
 
+FORM_INSTRUCTIONS = {
+    "story": "Form: story. Write an original narrative grounded only in the evidence; never invent factual claims.",
+    "science": "Form: science. Explain the evidence as a clear, accurate science article with limitations and context.",
+    "explainer": "Form: explainer. Write a clear general-interest explanation with a connected opening, body and conclusion.",
+}
+
+CLAIM_STOP_WORDS = {
+    "about", "according", "after", "again", "against", "because", "before", "being", "between",
+    "could", "during", "found", "from", "have", "into", "larger", "measured", "more", "other",
+    "reported", "research", "researchers", "showed", "shows", "smaller", "study", "than", "that",
+    "their", "there", "these", "they", "this", "those", "through", "using", "were", "when", "which",
+    "while", "with", "would",
+}
+
+
+def validate_claim_excerpts(
+    sentence: str,
+    indexes: list[int],
+    raw_excerpts,
+    evidence: list[dict[str, Any]],
+) -> list[dict]:
+    if not isinstance(raw_excerpts, list) or not raw_excerpts:
+        raise ValueError("Fact claim omitted exact evidence excerpts")
+    citations = []
+    for item in raw_excerpts:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid evidence excerpt shape")
+        index = item.get("evidenceIndex")
+        excerpt = re.sub(r"\s+", " ", str(item.get("excerpt", ""))).strip()
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or index not in indexes
+            or not 12 <= len(excerpt) <= 600
+        ):
+            raise ValueError("Evidence excerpt does not match its cited source")
+        source_text = re.sub(
+            r"\s+", " ", str(evidence[index].get("summary", ""))[:2500]
+        ).strip()
+        if excerpt not in source_text:
+            raise ValueError("Evidence excerpt is not verbatim source text")
+        citations.append({"evidenceIndex": index, "excerpt": excerpt})
+    if set(indexes) - {item["evidenceIndex"] for item in citations}:
+        raise ValueError("Every cited source needs an exact evidence excerpt")
+
+    combined = " ".join(item["excerpt"] for item in citations)
+    for number in re.findall(r"\b\d+(?:[.,:/-]\d+)*%?", sentence):
+        if not re.search(rf"(?<![\w]){re.escape(number)}(?![\w])", combined):
+            raise ValueError("Fact claim number differs from the evidence excerpt")
+    anchors = {
+        word.lower()
+        for word in re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", sentence)
+        if len(word) >= 4 and word.lower() not in CLAIM_STOP_WORDS
+    }
+    matched = {
+        word for word in anchors
+        if re.search(rf"\b{re.escape(word)}\b", combined, re.IGNORECASE)
+    }
+    if len(matched) < min(2, len(anchors)):
+        raise ValueError("Evidence excerpt is unrelated to the fact claim")
+    return citations
+
 
 class EditorialUnavailable(RuntimeError):
     pass
@@ -168,9 +230,23 @@ class EditorialGateway:
             "daily_article", provider.name, provider.model, False, 0, 0, False, 0,
         )
 
-    async def generate(self, topic: str, level: str, evidence: list[dict[str, Any]]) -> dict:
+    async def generate(
+        self,
+        topic: str,
+        level: str,
+        evidence: list[dict[str, Any]],
+        *,
+        form: str = "explainer",
+        word_range: tuple[int, int] | None = None,
+    ) -> dict:
         if level not in LEVEL_TARGETS:
             raise ValueError(f"Unsupported CEFR level: {level}")
+        if form not in FORM_INSTRUCTIONS:
+            raise ValueError(f"Unsupported article form: {form}")
+        if word_range is not None and (
+            len(word_range) != 2 or word_range[0] <= 0 or word_range[1] < word_range[0]
+        ):
+            raise ValueError("Invalid article word range")
         started = time.monotonic()
         for provider in self._ranked_providers():
             if not provider.configured or self.cooldown_until.get(provider.name, 0) > time.monotonic():
@@ -183,7 +259,7 @@ class EditorialGateway:
             result = None
             try:
                 result = await asyncio.wait_for(
-                    self._call(provider, topic, level, evidence),
+                    self._call(provider, topic, level, evidence, form=form, word_range=word_range),
                     timeout=timeout,
                 )
                 validated = self._validate(
@@ -192,6 +268,8 @@ class EditorialGateway:
                     level,
                     len(evidence[:4]),
                     require_learning_assets=True,
+                    word_range=word_range,
+                    evidence=evidence[:4],
                 )
                 metric = self.metrics[provider.name]
                 metric["successes"] += 1
@@ -401,8 +479,13 @@ class EditorialGateway:
         topic: str,
         level: str,
         evidence: list[dict[str, Any]],
+        *,
+        form: str = "explainer",
+        word_range: tuple[int, int] | None = None,
     ) -> dict:
         minimum, maximum, level_instruction = LEVEL_TARGETS[level]
+        if word_range is not None:
+            minimum, maximum = word_range
         compact_evidence = [
             {
                 "title": item.get("title", ""),
@@ -416,6 +499,7 @@ class EditorialGateway:
         ]
         system = (
             "You are the editorial writer for Soda Reading, an English learning reader. "
+            f"{FORM_INSTRUCTIONS[form]} "
             "Write an original, self-contained English learning article based ONLY on the supplied evidence. "
             "Do not imitate or claim to be the source publication. Do not invent numbers, causes, quotations, "
             "dates, methods, or conclusions. Explain uncertainty and study limitations. The article must have "
@@ -423,15 +507,18 @@ class EditorialGateway:
             "title (English string), summaryZh (Simplified Chinese string), paragraphs (array of 3-7 English strings), "
             "sentenceTranslations (object mapping EVERY exact English sentence in paragraphs to a natural Simplified "
             "Chinese translation), glossary (array of 15-25 objects with word, lemma, partOfSpeech, phonetic, "
-            "translation, and exact sentence), and factClaims (array of objects with sentence and evidenceIndexes). "
+            "translation, and exact sentence), and factClaims (array of objects with sentence, evidenceIndexes, "
+            "and evidenceExcerpts). Each evidenceExcerpts item must contain evidenceIndex and a short exact excerpt "
+            "copied verbatim from that cited source. Every cited source index needs a relevant excerpt. "
             "Glossary words must occur in the article and prioritize likely difficult, reusable vocabulary. "
             "Each sentence containing a number, date, "
             "study result, comparison, or causal claim must appear verbatim in factClaims and cite one or more supplied "
-            "evidence array indexes. "
+            "evidence array indexes with exact supporting excerpts. "
             "No markdown and no citations inside the prose."
         )
         user = {
             "topic": topic,
+            "form": form,
             "targetCefr": level,
             "wordRange": [minimum, maximum],
             "levelGuidance": level_instruction,
@@ -478,6 +565,8 @@ class EditorialGateway:
         level: str,
         evidence_count: int,
         require_learning_assets: bool = False,
+        word_range: tuple[int, int] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
     ) -> dict:
         title = str(result.get("title", "")).strip()
         summary = str(result.get("summaryZh", "")).strip()
@@ -488,7 +577,7 @@ class EditorialGateway:
         if len(paragraphs) < 3:
             raise ValueError("Editorial article has no complete argument structure")
         word_count = len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", " ".join(paragraphs)))
-        minimum, maximum, _ = LEVEL_TARGETS[level]
+        minimum, maximum = word_range or LEVEL_TARGETS[level][:2]
         if word_count < minimum or word_count > maximum:
             raise ValueError(f"Editorial article word count {word_count} is outside {minimum}-{maximum}")
         claims = result.get("factClaims")
@@ -509,7 +598,12 @@ class EditorialGateway:
                 or any(not isinstance(index, int) or index < 0 or index >= evidence_count for index in indexes)
             ):
                 raise ValueError("Fact claim is not traceable to supplied evidence")
-            normalized_claims.append({"sentence": sentence, "evidenceIndexes": sorted(set(indexes))})
+            normalized_claim = {"sentence": sentence, "evidenceIndexes": sorted(set(indexes))}
+            if evidence is not None:
+                normalized_claim["evidenceExcerpts"] = validate_claim_excerpts(
+                    sentence, indexes, claim.get("evidenceExcerpts"), evidence,
+                )
+            normalized_claims.append(normalized_claim)
         traced_sentences = {claim["sentence"] for claim in normalized_claims}
         article_sentences = [
             sentence.strip()
@@ -519,7 +613,7 @@ class EditorialGateway:
         ]
         for sentence in article_sentences:
             if re.search(
-                r"\d|%|\b(found|showed|reported|suggests?|causes?|led to|increased?|decreased?|according to)\b",
+                r"\d|%|\b(found|showed|reported|suggests?|causes?|led to|increased?|decreased?|according to|discovered|larger|smaller|higher|lower|more than|less than|linked to|associated with|due to|resulted in|before|after)\b",
                 sentence,
                 re.IGNORECASE,
             ) and sentence.strip() not in traced_sentences:

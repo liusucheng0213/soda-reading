@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Preferences(BaseModel):
@@ -16,6 +16,15 @@ class Preferences(BaseModel):
     def valid_time(cls, value: str) -> str:
         datetime.strptime(value, "%H:%M")
         return value
+
+
+class DailyArticleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interest: Literal["科技", "文化", "商业", "自然", "健康", "历史"]
+    form: Literal["story", "science", "explainer"] = "explainer"
+    length: Literal["short", "medium", "long"] = "medium"
+    cefr: Literal["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 class TranslationRequest(BaseModel):

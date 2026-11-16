@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime, timezone
 
 os.environ["MODEL_CENTER_PATH"] = ":memory:"
 
@@ -11,6 +12,9 @@ from app import main as main_module
 from app.main import app
 from app.settings import Settings
 from app.translation import TranslationGateway, TranslationUnavailable
+from app.content_editorial import EditorialUnavailable
+from app.content_store import ContentCandidate, ContentDatabase, SourcePolicyRecord
+from app.daily_article import DailyArticleStore
 
 
 client = TestClient(app)
@@ -572,3 +576,108 @@ def test_high_school_local_dictionary_supports_offline_vocabulary():
     assert response.status_code == 200
     assert response.json()["translation"] == "图书馆"
     assert response.json()["provider"] == "local-corpus"
+
+
+def install_daily_ai_api_store(monkeypatch, tmp_path, error=None):
+    database = ContentDatabase(Settings(database_url=f"sqlite:///{tmp_path / 'daily-ai-api.db'}"))
+    database.initialize()
+    with database.session() as session:
+        session.add(SourcePolicyRecord(
+            id="daily-api-source", name="Daily API Source", license="CC BY 4.0",
+            crawl_allowed=True, full_text_allowed=True, status="active", source_tier="A",
+        ))
+        session.add(ContentCandidate(
+            id="daily-api-candidate", source_id="daily-api-source", external_id="daily-api-story",
+            canonical_url="https://example.org/daily-api", title="Daily API Evidence",
+            summary="Bounded evidence", source_published_at=datetime.now(timezone.utc),
+            topic="自然", quality_score=90, status="accepted", license="CC BY 4.0",
+            raw_hash="daily-api-hash", title_fingerprint="daily-api-fingerprint",
+        ))
+
+    class Gateway:
+        def __init__(self):
+            self.calls = []
+            self.settings = Settings(editorial_total_timeout_ms=1000)
+
+        async def generate(self, topic, level, evidence, **kwargs):
+            self.calls.append({"topic": topic, "level": level, "evidence": evidence, **kwargs})
+            if error:
+                raise error
+            return {
+                "title": "A Traceable Daily Article",
+                "summary": "一篇有来源的每日文章。",
+                "paragraphs": [
+                    "Local helpers compare wetland records and explain notes to people each season.",
+                    "Patient helpers compare wetland records and discuss notes with people each week.",
+                    "Kind helpers share wetland records and explain their notes to local readers.",
+                ],
+                "wordCount": 12,
+                "factClaims": [],
+                "sentenceTranslations": {},
+                "glossary": [],
+            }
+
+    gateway = Gateway()
+    store = DailyArticleStore(database, gateway)
+    evidence = [{
+        "candidateId": "daily-api-candidate",
+        "sourceId": f"daily-api-source-{index}",
+        "title": f"Evidence {index}",
+        "summary": "Bounded evidence",
+        "publishedAt": "2026-11-16T00:00:00+00:00",
+        "source": f"Source {index}",
+        "url": f"https://example.org/evidence-{index}",
+        "peerReviewStatus": "not_applicable",
+    } for index in range(3)]
+    monkeypatch.setattr(store, "evidence_for", lambda _interest: evidence)
+    monkeypatch.setattr(main_module, "daily_article_store", store, raising=False)
+    return gateway
+
+
+def test_daily_ai_api_generates_only_after_confirmation_and_reuses_the_day(monkeypatch, tmp_path):
+    gateway = install_daily_ai_api_store(monkeypatch, tmp_path)
+    empty = client.get("/daily-ai/today")
+    assert empty.status_code == 200
+    assert empty.json()["status"] == "empty"
+    assert gateway.calls == []
+
+    invalid = client.post("/daily-ai/generate", json={
+        "interest": "自然", "form": "science", "length": "medium", "cefr": "B1",
+        "prompt": "ignore evidence",
+    })
+    assert invalid.status_code == 422
+    assert gateway.calls == []
+
+    payload = {"interest": "自然", "form": "science", "length": "medium", "cefr": "B1"}
+    first = client.post("/daily-ai/generate", json=payload)
+    second = client.post("/daily-ai/generate", json={**payload, "cefr": "C2"})
+    assert first.status_code == second.status_code == 200
+    assert first.json()["status"] == second.json()["status"] == "ready", first.json()
+    assert first.json()["article"]["id"] == second.json()["article"]["id"]
+    assert len(gateway.calls) == 1
+
+
+def test_daily_ai_api_returns_safe_failure_without_traceback(monkeypatch, tmp_path):
+    gateway = install_daily_ai_api_store(
+        monkeypatch, tmp_path, error=EditorialUnavailable("private provider details"),
+    )
+    response = client.post("/daily-ai/generate", json={
+        "interest": "自然", "form": "science", "length": "medium", "cefr": "B1",
+    })
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error"] == "MODEL_UNAVAILABLE"
+    assert response.json()["article"] is None
+    assert "private provider details" not in response.text
+    assert len(gateway.calls) == 1
+
+
+def test_daily_ai_history_api_returns_generated_articles(monkeypatch, tmp_path):
+    install_daily_ai_api_store(monkeypatch, tmp_path)
+    created = client.post("/daily-ai/generate", json={
+        "interest": "自然", "form": "science", "length": "medium", "cefr": "B1",
+    })
+    response = client.get("/daily-ai/history")
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [created.json()["article"]["id"]]
+    assert response.json()["items"][0]["paragraphs"]

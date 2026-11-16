@@ -23,7 +23,7 @@ import {
   topicOptions,
   typefaceOptions,
 } from "./data.js";
-import { getDailyFeed, getExamCatalog, saveProfile } from "./lib/api.js";
+import { generateDailyAi, getDailyAiHistory, getDailyAiToday, getDailyFeed, getExamCatalog, saveProfile } from "./lib/api.js";
 import { EXAM_TRACK_LABELS, examOriginLabel, filterExamArticles } from "./lib/exams.js";
 import { DEFAULT_LOCAL_PROFILE, normalizeProfile } from "./lib/profile.js";
 import { dueCards } from "@soda-reading/core";
@@ -34,6 +34,7 @@ import { DataManagement } from "./screens/DataManagement.jsx";
 import { PlacementScreen } from "./screens/PlacementScreen.jsx";
 import { ReaderScreen } from "./screens/ReaderScreen.jsx";
 import { VocabularyScreen } from "./screens/VocabularyScreen.jsx";
+import { DailyAiPanel, dailyAiArticle } from "./screens/DailyAiPanel.jsx";
 import { articleWithBody, displayFeed } from "./lib/feed.js";
 import {
   applyReadingProgress,
@@ -129,6 +130,8 @@ function SodaApp() {
   const [placementOpen, setPlacementOpen] = useState(false);
   const [placement, setPlacement] = useAccountState(accountName, "placement", null);
   const [feed, setFeed] = useState({ primary: demoArticle, alternatives: dailyAlternatives, fallback: true });
+  const [dailyAiState, setDailyAiState] = useState(null);
+  const [dailyAiHistory, setDailyAiHistory] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [examCatalog, setExamCatalog] = useState([]);
   const [examError, setExamError] = useState(null);
@@ -143,6 +146,7 @@ function SodaApp() {
   const [reviewFilterId, setReviewFilterId] = useState(null);
   const [closedArticleId, setClosedArticleId] = useState("");
   const profileSaveRef = useRef(0);
+  const generatedDailyArticle = dailyAiArticle(dailyAiState);
 
   useEffect(() => {
     setProfile((current) => normalizeProfile(current));
@@ -152,6 +156,8 @@ function SodaApp() {
   useEffect(() => {
     const shown = displayFeed(feed, profile, fallbackLibrary);
     const catalog = uniqueArticles([
+      generatedDailyArticle,
+      ...dailyAiHistory,
       shown.primary,
       ...(shown.alternatives ?? []),
       ...fallbackLibrary,
@@ -161,7 +167,7 @@ function SodaApp() {
     const next = resumeFromProgress(catalog, progress, resume);
     if (!next?.id || next.id === resume?.id) return;
     setResume(next);
-  }, [feed, profile, examCatalog, documents, progress, resume]);
+  }, [feed, profile, examCatalog, documents, progress, resume, generatedDailyArticle, dailyAiHistory]);
 
   useEffect(() => {
     let active = true;
@@ -172,6 +178,56 @@ function SodaApp() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    getDailyAiToday().then((next) => {
+      if (active) setDailyAiState(next);
+    }).catch(() => {
+      if (active) setDailyAiState({ status: "failed", article: null, error: "NETWORK_ERROR" });
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getDailyAiHistory().then((result) => {
+      if (active) setDailyAiHistory(result.items ?? []);
+    }).catch(() => {
+      if (active) setDailyAiHistory([]);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (dailyAiState?.status !== "generating") return undefined;
+    let active = true;
+    let timer;
+    const check = async () => {
+      try {
+        const next = await getDailyAiToday();
+        if (!active) return;
+        setDailyAiState(next);
+        if (next.status === "generating") timer = setTimeout(check, 1200);
+      } catch {
+        if (active) setDailyAiState({ status: "failed", article: null, error: "NETWORK_ERROR" });
+      }
+    };
+    timer = setTimeout(check, 1200);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [dailyAiState?.status]);
+
+  const confirmDailyAi = async (preferences) => {
+    const next = await generateDailyAi(preferences);
+    setDailyAiState(next);
+    if (next.article?.paragraphs?.length) {
+      setDailyAiHistory((current) => uniqueArticles([next.article, ...current]));
+    }
+    return next;
+  };
 
   useEffect(() => {
     let active = true;
@@ -330,6 +386,8 @@ function SodaApp() {
   const canResume = Boolean(resume?.id && resumeProgress > 0.02 && resumeProgress < 0.96);
   const shownFeed = displayFeed(feed, profile, fallbackLibrary);
   const catalog = uniqueArticles([
+    generatedDailyArticle,
+    ...dailyAiHistory,
     shownFeed.primary,
     ...(shownFeed.alternatives ?? []),
     ...fallbackLibrary,
@@ -349,6 +407,8 @@ function SodaApp() {
             onOpen={openArticle}
             onLevelChange={(level) => updateProfile({ ...profile, level })}
             onTrackChange={(track) => updateProfile({ ...profile, track })}
+            dailyAiState={dailyAiState}
+            onGenerateDailyAi={confirmDailyAi}
             closedArticleId={closedArticleId}
             reviewCount={dueReviewCount}
             onReview={() => {
@@ -361,7 +421,7 @@ function SodaApp() {
         {screen === "library" && (
           <LibraryScreen
             documents={documents}
-            catalog={uniqueArticles([shownFeed.primary, ...(shownFeed.alternatives ?? []), ...fallbackLibrary])}
+            catalog={uniqueArticles([generatedDailyArticle, ...dailyAiHistory, shownFeed.primary, ...(shownFeed.alternatives ?? []), ...fallbackLibrary])}
             examCatalog={examCatalog}
             examError={examError}
             progress={progress}
@@ -462,7 +522,7 @@ const HOME_TRACKS = [
   { id: "high_school", label: "高中" },
 ];
 
-function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, onTrackChange, closedArticleId, reviewCount = 0, onReview }) {
+function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, onTrackChange, dailyAiState, onGenerateDailyAi, closedArticleId, reviewCount = 0, onReview }) {
   const primary = feed.primary ?? demoArticle;
   const alternatives = feed.alternatives ?? [];
   const intro = primary.introZh || primary.summary;
@@ -503,7 +563,13 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, onTrackChang
           </button>
         ))}
       </div>
-      {resume && resume.id !== primary.id && (
+      <DailyAiPanel
+        profile={profile}
+        state={dailyAiState}
+        onGenerate={onGenerateDailyAi}
+        onOpen={onOpen}
+      />
+      {resume && resume.id !== primary.id && resume.id !== dailyAiState?.article?.id && (
         <button className="resume-strip" type="button" onClick={() => onOpen(resume)}>
           <span>接着读</span>
           <strong>{resume.title}</strong>

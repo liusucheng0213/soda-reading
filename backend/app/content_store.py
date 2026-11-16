@@ -214,6 +214,19 @@ class DailyRecommendation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class DailyArticleRecord(Base):
+    __tablename__ = "daily_article_records"
+
+    user_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    generation_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default="generating", index=True)
+    request_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    article_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    error: Mapped[str] = mapped_column(String(80), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class ContentDatabase:
     def __init__(self, settings: Settings):
         self.settings = settings

@@ -97,8 +97,13 @@ python scripts/import_exam_content.py content/high-school
 - 高中阅读复用答题、解析、收藏、本文复习和原文返回。离线词典补充 `library / avoid / reveal / responsibility / pollinators / accuracy`，无密钥时也能完成这些词的收藏闭环。
 - 单一来源失败不阻断其他来源；本轮不足 3 篇可发布正文时返回 0，不覆盖既有 `DailyEdition`。2026-11-16 故障模拟中，NSF 异常、另一来源完成，8 个既有文章 ID 和高中正文均保留。
 
-## 第五阶段准备度
+## 第五阶段：读者确认的每日 AI 文章
 
-已具备：`daily_article` 独立路由、共享预算与用量记录、来源与候选池、有界证据、既有生成结果校验、失败备用文章和本机内容数据库。
-
-尚未实现：读者确认入口、兴趣/形式/篇幅参数、每日文章专用证据装配、Asia/Shanghai 自然日生成锁与每日缓存、刷新防重复生成，以及读者端完整生成/降级验收。阶段 5 尚未开始，不提前勾选。
+- `GET /daily-ai/today` 只读取当日状态，不触发模型；`POST /daily-ai/generate` 接收 `interest/form/length/cefr`，只有读者明确确认才调用。`GET /daily-ai/history` 返回本机已生成文章的完整可读正文，供书架和生词原文返回使用。
+- 兴趣限定为科技、文化、商业、自然、健康、历史；形式为 `story/science/explainer`；篇幅为 `short/medium/long`，在原有 CEFR 词数区间内细分，不接受自由提示词。
+- 证据只来自 `accepted`、许可明确、来源启用、质量达标且非考试的候选，按来源去重后取 3–4 个。每个摘要最多 2400 字符；正文摘录同时要求候选与来源策略允许全文使用。少于 3 个合格来源时返回 `INSUFFICIENT_EVIDENCE`，不调用模型。
+- 生成结果必须有逐句中文翻译、15–25 个语境词汇和事实 claim 的精确来源摘录。确定性代码核对摘录确实来自引用来源、数字一致且有内容词重叠；这不能保证模型语义正确，`FactClaim.verified` 保持 `false`，不冒充人工事实核验。
+- CEFR 词数和形式参数受控，保存前另用现有启发式指标拒绝超过一级的估算偏差并返回 `CEFR_MISMATCH`。该指标只是发布护栏，不是标准化等级测评。
+- SQLite `daily_article_records` 以本机读者和 Asia/Shanghai 日期为联合主键。预留日期在确认时固定，跨午夜完成、失败或取消仍写回同一记录；数据库唯一键和进程内锁防止双击与并发重复调用。陈旧 `generating` 只转为 `GENERATION_INTERRUPTED`，不自动重试。
+- 同日 `ready/failed` 都复用，不因参数变化、刷新或重复 POST 再生成；第一版失败也不提供同日重新生成，普通今日文章继续可读。历史文章留在本机内容库，不进入个人备份或考试轨道。
+- 付费调用继续使用 `daily_article` 路由、共享预算、单次上限和用量统计。错误只返回安全错误码，不记录完整密钥、提示词或模型响应全文。
