@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .content import ContentService
 from .content_editorial import EditorialGateway
+from .content_moderation import ContentModerationGateway
 from .exam_store import ExamContentStore
 from .model_center import MODEL_CENTER_PATH, ModelCenterStore
 from .provider_config import public_config, save_overrides
@@ -27,6 +28,7 @@ gateway = TranslationGateway(settings, store=model_store)
 content_service = ContentService(settings, model_store=model_store)
 exam_store = ExamContentStore(content_service.database)
 content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
+content_service.pipeline.moderation = ContentModerationGateway(settings, store=model_store)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,9 +69,10 @@ async def health() -> dict:
 @app.get("/feed/daily")
 async def feed(
     level: Literal["A1", "A2", "B1", "B2", "C1", "C2"] = "B1",
+    track: Literal["daily", "high_school"] = "daily",
     topics: list[str] = Query(default=["科技", "文化"], min_length=1, max_length=4),
 ) -> dict:
-    preferences = Preferences(level=level, topics=topics)
+    preferences = Preferences(level=level, track=track, topics=topics)
     return content_service.daily_feed(preferences.model_dump(), "local-user")
 
 
@@ -134,6 +137,7 @@ async def admin_save_provider_config(payload: ProviderConfigRequest) -> dict:
         raise HTTPException(status_code=422, detail=str(error)) from error
     gateway = TranslationGateway(settings, store=model_store)
     content_service.pipeline.editorial = EditorialGateway(settings, store=model_store)
+    content_service.pipeline.moderation = ContentModerationGateway(settings, store=model_store)
     return {"saved": True, "config": public_config(), "providers": gateway.provider_status()}
 
 

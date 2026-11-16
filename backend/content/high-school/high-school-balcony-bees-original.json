@@ -1,0 +1,68 @@
+{
+  "id": "high-school-balcony-bees-original",
+  "title": "Why Bees Visit City Balconies",
+  "author": "苏打阅读编辑部",
+  "topic": "自然",
+  "cefr": "B1",
+  "publishedAt": "2026-11-16T08:20:00+08:00",
+  "introZh": "从一排阳台花盆看城市中的传粉者，以及普通人能提供的小帮助。",
+  "paragraphs": [
+    "On a row of apartment balconies in the city, small pots of lavender and rosemary attract bees every morning. There are no large fields nearby, but the balconies form a chain of feeding places. A bee can visit one pot, cross a narrow street, and find another flower on the opposite side.",
+    "This simple pattern shows why size is not the only thing that matters for urban wildlife. A single pot may offer little food, but many pots can provide meals throughout the day. Different flowers also bloom at different times, so a varied balcony garden can support visitors for more months of the year.",
+    "People who want to help do not need to fill every corner with plants. They can choose several kinds of flowers, avoid harmful sprays, and leave a shallow dish of clean water with stones for safe landing. These actions are small, but together they make the city easier for pollinators to cross."
+  ],
+  "examTrack": "high_school",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "What attracts bees to the balconies?",
+      "options": ["Large fields of wheat", "Bowls of sugar", "Pots of lavender and rosemary", "Rows of tall trees"],
+      "answer": "C",
+      "explanationZh": "开头明确说薰衣草和迷迭香花盆每天早晨吸引蜜蜂。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "On a row of apartment balconies in the city, small pots of lavender and rosemary attract bees every morning."
+    },
+    {
+      "id": "q2",
+      "prompt": "Why does the writer call the balconies a 'chain'?",
+      "options": ["They form connected feeding places", "They are joined by metal fences", "They keep bees inside one pot", "They block every narrow street"],
+      "answer": "A",
+      "explanationZh": "蜜蜂可以沿一排阳台连续觅食，因此 chain 比喻相互连接的觅食地点。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "There are no large fields nearby, but the balconies form a chain of feeding places."
+    },
+    {
+      "id": "q3",
+      "prompt": "How does growing different kinds of flowers help?",
+      "options": ["It makes every pot larger", "It removes the need for clean water", "It keeps all bees on one balcony", "It provides food during more months"],
+      "answer": "D",
+      "explanationZh": "不同花在不同时间开放，因此能在一年中的更多月份为传粉者提供食物。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "Different flowers also bloom at different times, so a varied balcony garden can support visitors for more months of the year."
+    },
+    {
+      "id": "q4",
+      "prompt": "What is the best title for the passage?",
+      "options": ["Small Balconies Can Help City Pollinators", "The Largest Fields in the Country", "Why Bees Should Avoid Cities", "How to Fill Every Corner with Plants"],
+      "answer": "A",
+      "explanationZh": "全文说明阳台花盆虽小，但连接起来能帮助城市传粉者。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "These actions are small, but together they make the city easier for pollinators to cross."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "high-school-balcony-bees-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-16T09:10:00+08:00",
+  "answersReviewedAt": "2026-11-16T09:40:00+08:00"
+}

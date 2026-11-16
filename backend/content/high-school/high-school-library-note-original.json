@@ -1,0 +1,68 @@
+{
+  "id": "high-school-library-note-original",
+  "title": "The Note in the Library Book",
+  "author": "苏打阅读编辑部",
+  "topic": "成长",
+  "cefr": "B1",
+  "publishedAt": "2026-11-16T08:10:00+08:00",
+  "introZh": "一张匿名纸条鼓励害怕开口的学生，用一个安静的句子迈出第一步。",
+  "paragraphs": [
+    "Daniel used to avoid speaking in class. When he borrowed a library book for a history project, a folded note fell from its pages. It said, 'You do not need to sound perfect to share a useful idea.' Daniel read the line twice and placed the note inside his notebook.",
+    "During the next group meeting, his classmates discussed an old railway station. Daniel knew that the station had once included a small library for workers. His first sentence came out quietly, and he expected someone to laugh. Instead, Mara asked him to explain more. By the end of the meeting, the group had added his discovery to their presentation.",
+    "A week later, Daniel returned the book and wrote a new note for the next reader. He did not reveal his name or claim that his fear had disappeared. He simply wrote that being heard can begin with one quiet sentence. Then he signed up to introduce the final part of his group's talk."
+  ],
+  "examTrack": "high_school",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "What did Daniel find inside the library book?",
+      "options": ["A railway ticket", "A folded note", "A class photograph", "A library card"],
+      "answer": "B",
+      "explanationZh": "第一段说明一张折起来的纸条从书页中掉了出来。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "When he borrowed a library book for a history project, a folded note fell from its pages."
+    },
+    {
+      "id": "q2",
+      "prompt": "What useful fact did Daniel know about the old station?",
+      "options": ["It had once had a small library for workers", "It had been built by his classmates", "It had become a bookshop", "It had closed before sunrise"],
+      "answer": "A",
+      "explanationZh": "Daniel 知道旧车站曾设有供工人使用的小图书馆。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "Daniel knew that the station had once included a small library for workers."
+    },
+    {
+      "id": "q3",
+      "prompt": "What does 'reveal' most nearly mean in the last paragraph?",
+      "options": ["Repeat", "Invent", "Show", "Hide"],
+      "answer": "C",
+      "explanationZh": "Daniel 没有透露自己的名字，reveal 在这里意为透露、让人知道。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "He did not reveal his name or claim that his fear had disappeared."
+    },
+    {
+      "id": "q4",
+      "prompt": "What does Daniel's new note suggest?",
+      "options": ["A person must speak perfectly to be heard", "A small first step can help someone gain confidence", "Fear disappears as soon as a project ends", "Only group leaders should share ideas"],
+      "answer": "B",
+      "explanationZh": "纸条强调从一句安静的话开始，说明小步尝试也能带来被倾听和建立信心的机会。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "He simply wrote that being heard can begin with one quiet sentence."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "high-school-library-note-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-16T09:05:00+08:00",
+  "answersReviewedAt": "2026-11-16T09:35:00+08:00"
+}

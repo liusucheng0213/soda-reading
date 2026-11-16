@@ -956,3 +956,98 @@ def test_difficulty_metrics_cover_entry_and_advanced_levels():
     assert simple["estimatedCefr"] == "A1"
     assert advanced["estimatedCefr"] == "C2"
     assert list(LEVEL_TARGETS) == ["A1", "A2", "B1", "B2", "C1", "C2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_id", ["nsf-rss", "energy-gov-rss"])
+async def test_new_government_rss_sources_keep_only_licensed_text(source_id):
+    policy = next((item for item in SOURCE_POLICIES if item.id == source_id), None)
+    assert policy is not None
+    assert policy.sourceTier == "A"
+    assert policy.fullTextAllowed is True
+    host = "www.nsf.gov" if source_id == "nsf-rss" else "www.energy.gov"
+    feed = f"""<?xml version="1.0"?>
+    <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item>
+      <title>Researchers explain a useful public science project</title>
+      <link>https://{host}/story</link>
+      <guid>story-1</guid>
+      <pubDate>Sat, 14 Nov 2026 12:00:00 GMT</pubDate>
+      <content:encoded><![CDATA[
+        <p>Researchers describe a public science project and explain why its observations matter to nearby communities. They introduce the research question, the people involved, and the practical problem that the project is trying to solve. The opening also gives readers enough background to understand why the work was started and how it connects with everyday public life. A short example shows how a local school or library might use the findings without treating them as a universal solution.</p>
+        <p>The team shares enough methods, evidence, and limitations for readers to understand the result without seeing private data. Several measurements are compared over time, and the researchers explain where the samples came from and which uncertainties remain. They avoid presenting an early observation as a final answer, and they identify the additional checks that would make the evidence stronger. The methods section also explains why one surprising result was checked again before the team drew any wider conclusions.</p>
+        <p>The report closes with practical lessons and a careful plan for future work rather than a sensational promise. Local participants explain what they learned, while the research team describes the next stage of the project and the questions that still need attention. This complete conclusion gives the reading a useful ending without relying on images, slogans, navigation text, or promotional material. Readers leave with a clear view of the project's value, its limits, and the work still ahead.</p>
+        <img src="third-party-image.jpg" alt="third-party-image-must-not-be-copied" />
+      ]]></content:encoded>
+    </item></channel></rss>""".encode()
+
+    class FakeClient:
+        def clear_conditional(self, _source_id):
+            return None
+
+        async def get(self, source, params=None, url=None):
+            return httpx.Response(
+                200,
+                content=feed,
+                request=httpx.Request("GET", url or source.endpoint),
+            )
+
+    candidates = await RssAdapter(policy, FakeClient()).fetch(1)
+
+    assert len(candidates) == 1
+    assert candidates[0].source_id == source_id
+    assert candidates[0].full_text_allowed is True
+    assert len(candidates[0].metadata["paragraphs"]) == 3
+    assert "third-party-image" not in " ".join(candidates[0].metadata["paragraphs"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_id", ["nsf-rss", "energy-gov-rss"])
+async def test_new_government_sources_downgrade_external_and_restricted_text(source_id):
+    policy = next(item for item in SOURCE_POLICIES if item.id == source_id)
+    host = "www.nsf.gov" if source_id == "nsf-rss" else "www.energy.gov"
+    safe = (
+        "Official researchers explain a public project, its methods, its limitations, and its relevance "
+        "for local readers without making a sensational or unsupported claim. "
+    ) * 10
+    restricted = (
+        "This third-party article is reproduced with permission from Example News. All rights reserved. "
+        + safe
+    )
+    feed = f"""<?xml version="1.0"?>
+    <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+      <item>
+        <title>External article that must only be indexed</title>
+        <link>https://third-party.example/story</link><guid>external</guid>
+        <pubDate>Sat, 14 Nov 2026 12:00:00 GMT</pubDate>
+        <content:encoded><![CDATA[<p>{safe}</p><p>{safe}</p><p>{safe}</p>]]></content:encoded>
+      </item>
+      <item>
+        <title>Third party text with restricted reproduction rights</title>
+        <link>https://{host}/restricted</link><guid>restricted</guid>
+        <pubDate>Sat, 14 Nov 2026 12:00:00 GMT</pubDate>
+        <content:encoded><![CDATA[<p>{restricted}</p><p>{safe}</p><p>{safe}</p>]]></content:encoded>
+      </item>
+    </channel></rss>""".encode()
+    requested_urls = []
+
+    class FakeClient:
+        def clear_conditional(self, _source_id):
+            return None
+
+        async def robots_allowed(self, _url):
+            return True
+
+        async def get(self, source, params=None, url=None):
+            requested_urls.append(url or source.endpoint)
+            return httpx.Response(
+                200,
+                content=feed,
+                request=httpx.Request("GET", url or source.endpoint),
+            )
+
+    candidates = await RssAdapter(policy, FakeClient()).fetch(2)
+
+    assert len(candidates) == 2
+    assert all(candidate.full_text_allowed is False for candidate in candidates)
+    assert all("paragraphs" not in candidate.metadata for candidate in candidates)
+    assert "https://third-party.example/story" not in requested_urls

@@ -1,6 +1,7 @@
 export const DEFAULT_LOCAL_PROFILE = {
   username: "local",
   level: "B1",
+  track: "daily",
   topics: ["科技", "文化"],
   minutes: 10,
   reminder: "20:30",
@@ -15,6 +16,7 @@ export function normalizeProfile(value) {
     ...DEFAULT_LOCAL_PROFILE,
     ...withoutRole,
     username: "local",
+    track: ["daily", "high_school"].includes(profile.track) ? profile.track : "daily",
     topics: profile.topics?.length ? profile.topics.slice(0, 4) : [...DEFAULT_LOCAL_PROFILE.topics],
     minutes: [5, 10, 20].includes(profile.minutes) ? profile.minutes : 10,
     reviewLimit: [10, 20, 30, 40, 50].includes(profile.reviewLimit) ? profile.reviewLimit : 20,

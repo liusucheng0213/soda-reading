@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class Preferences(BaseModel):
     level: Literal["A1", "A2", "B1", "B2", "C1", "C2"] = "B1"
+    track: Literal["daily", "high_school"] = "daily"
     topics: list[str] = Field(default_factory=lambda: ["科技", "文化"], min_length=1, max_length=4)
     minutes: Literal[5, 10, 20] = 10
     reminder: str = "20:30"
@@ -40,6 +41,7 @@ class SourcePolicy(BaseModel):
     sourceTier: Literal["A", "B", "C"] = "B"
     sourceType: Literal["api", "rss", "sitemap", "html", "editorial"] = "api"
     endpoint: str = ""
+    allowedContentHosts: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
     peerReviewDefault: Literal["peer_reviewed", "preprint", "not_applicable", "unknown"] = "unknown"
     freshnessClass: Literal["news", "paper", "evergreen", "literature"] = "news"

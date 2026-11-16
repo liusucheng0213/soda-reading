@@ -84,6 +84,48 @@ LOCAL_DICTIONARY = {
         "translation": "善于思考的",
         "commonTranslation": "体贴的",
     },
+    "library": {
+        "lemma": "library",
+        "phonetic": "/ˈlaɪbreri/",
+        "partOfSpeech": "n.",
+        "translation": "图书馆",
+        "commonTranslation": "图书馆",
+    },
+    "avoid": {
+        "lemma": "avoid",
+        "phonetic": "/əˈvɔɪd/",
+        "partOfSpeech": "v.",
+        "translation": "避免",
+        "commonTranslation": "避免",
+    },
+    "reveal": {
+        "lemma": "reveal",
+        "phonetic": "/rɪˈviːl/",
+        "partOfSpeech": "v.",
+        "translation": "透露",
+        "commonTranslation": "揭示",
+    },
+    "responsibility": {
+        "lemma": "responsibility",
+        "phonetic": "/rɪˌspɒnsəˈbɪləti/",
+        "partOfSpeech": "n.",
+        "translation": "责任",
+        "commonTranslation": "责任",
+    },
+    "pollinators": {
+        "lemma": "pollinator",
+        "phonetic": "/ˈpɒlɪneɪtəz/",
+        "partOfSpeech": "n.",
+        "translation": "传粉者",
+        "commonTranslation": "传粉者",
+    },
+    "accuracy": {
+        "lemma": "accuracy",
+        "phonetic": "/ˈækjʊrəsi/",
+        "partOfSpeech": "n.",
+        "translation": "准确性",
+        "commonTranslation": "准确性",
+    },
 }
 
 KNOWN_SENTENCES = {

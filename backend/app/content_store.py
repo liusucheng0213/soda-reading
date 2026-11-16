@@ -180,6 +180,8 @@ class PipelineRun(Base):
     published_count: Mapped[int] = mapped_column(Integer, default=0)
     source_stats: Mapped[dict] = mapped_column(JSON, default=dict)
     topic_coverage: Mapped[dict] = mapped_column(JSON, default=dict)
+    moderation_stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    edition_coverage: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str] = mapped_column(Text, default="")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -246,6 +248,17 @@ class ContentDatabase:
                                 connection.execute(text(f"ALTER TABLE article_variants ADD COLUMN {name} {kind}"))
                             if "exam_track" in dict(missing):
                                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_article_variants_exam_track ON article_variants (exam_track)"))
+            if self.settings.database_url.startswith("sqlite") and "pipeline_runs" in inspector.get_table_names():
+                run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
+                additions = {
+                    "moderation_stats": "JSON",
+                    "edition_coverage": "JSON",
+                }
+                missing = [name for name in additions if name not in run_columns]
+                if missing:
+                    with self.engine.begin() as connection:
+                        for name in missing:
+                            connection.execute(text(f"ALTER TABLE pipeline_runs ADD COLUMN {name} {additions[name]}"))
 
     @contextmanager
     def session(self) -> Iterator[Session]:

@@ -13,6 +13,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete, or_, select
 
 from .content_editorial import EditorialGateway, EditorialUnavailable, LEVEL_TARGETS
+from .content_moderation import (
+    MODERATION_PROMPT_VERSION,
+    ContentModerationGateway,
+    moderate_candidate_rules,
+    moderation_input_hash,
+)
 from .content_sources import (
     LANGUAGE_IDENTIFIER,
     SOURCE_POLICIES,
@@ -50,6 +56,7 @@ COMMON_ENGLISH_WORDS = {
 FRESHNESS_DAYS = {"news": 90, "paper": 90, "evergreen": 365, "literature": 73000}
 FAST_SOURCE_IDS = {
     "nasa-rss",
+    "nsf-rss",
     "the-conversation-atom",
     "wikipedia-featured",
     "zhwiki-featured",
@@ -306,6 +313,7 @@ class ContentPipeline:
         self.database = database
         self.adapters = build_adapters(settings, database)
         self.editorial = EditorialGateway(settings, store=model_store)
+        self.moderation = ContentModerationGateway(settings, store=model_store)
 
     def initialize(self) -> None:
         self.database.initialize()
@@ -313,7 +321,7 @@ class ContentPipeline:
             current_policy_ids = {policy.id for policy in SOURCE_POLICIES}
             for existing in session.scalars(select(SourcePolicyRecord)):
                 if existing.id not in current_policy_ids:
-                    existing.status = "retired"
+                    existing.status = "active" if existing.id.startswith("exam-source-") else "retired"
                     existing.crawl_allowed = False
             for policy in SOURCE_POLICIES:
                 record = session.get(SourcePolicyRecord, policy.id) or SourcePolicyRecord(id=policy.id)
@@ -344,6 +352,21 @@ class ContentPipeline:
         try:
             raw, source_stats = await self._discover(requested)
             accepted_ids, stats, coverage = self._filter_and_store(raw, run_id)
+            ai_stats = {"aiAccepted": 0, "aiRejected": 0, "aiSkipped": 0}
+            if generate or publish:
+                additional_ids, ai_result = await self._moderate_review_candidates(run_id)
+                accepted_ids.extend(additional_ids)
+                stats["accepted"] += ai_result["accepted"]
+                stats["rejected"] += ai_result["rejected"]
+                ai_stats = {key: ai_result[key] for key in ai_stats}
+                reasons = Counter(stats["rejectionReasons"])
+                reasons.update(ai_result["reasons"])
+                stats["rejectionReasons"] = dict(
+                    sorted(reasons.items(), key=lambda pair: (-pair[1], pair[0]))
+                )
+                coverage = self._pool_coverage(datetime.now(timezone.utc))
+            else:
+                ai_stats["aiSkipped"] = len(self._review_candidates(run_id))
             clusters = self._cluster(accepted_ids)
             generated_count = await self._generate(clusters) if generate else 0
             if generate:
@@ -365,6 +388,13 @@ class ContentPipeline:
                 stored.published_count = published_count
                 stored.source_stats = source_stats
                 stored.topic_coverage = coverage
+                stored.moderation_stats = {
+                    "reasons": stats["rejectionReasons"],
+                    "ruleRejected": stats["ruleRejected"],
+                    **ai_stats,
+                }
+                published_edition = session.get(DailyEdition, target_date) if published_count else None
+                stored.edition_coverage = dict(published_edition.coverage or {}) if published_edition else {}
                 stored.finished_at = utc_now()
             return self.get_run(run_id)
         except Exception as error:
@@ -491,7 +521,14 @@ class ContentPipeline:
         by_source: Counter[str] = Counter()
         by_topic: Counter[str] = Counter()
         accepted_ids: list[str] = []
-        stats = {"accepted": 0, "duplicates": 0, "rejected": 0}
+        stats = {
+            "accepted": 0,
+            "duplicates": 0,
+            "rejected": 0,
+            "ruleRejected": 0,
+            "rejectionReasons": {},
+        }
+        rejection_reasons: Counter[str] = Counter()
         accepted_by_source: Counter[str] = Counter()
         duplicates_by_source: Counter[str] = Counter()
         source_cap = max(1, math.ceil(len(raw) * 0.25))
@@ -508,12 +545,15 @@ class ContentPipeline:
                 for policy in session.scalars(select(SourcePolicyRecord))
             }
             for item in ranked:
-                reasons = validate_candidate(item, now)
+                moderation = moderate_candidate_rules(item)
+                reasons = [*validate_candidate(item, now), *moderation.blocking_reasons]
                 if by_source[item.source_id] >= source_cap:
                     reasons.append("source_share_above_25_percent")
                 if by_topic[item.topic] >= topic_cap:
                     reasons.append("topic_share_above_30_percent")
                 quality = candidate_quality(item, corroboration[title_fingerprint(item.title)], now)
+                if quality < 65:
+                    reasons.append("quality_below_65")
                 canonical_url = canonicalize_url(item.url)
                 existing = session.scalar(
                     select(ContentCandidate).where(
@@ -531,7 +571,15 @@ class ContentPipeline:
                     stats["duplicates"] += 1
                     duplicates_by_source[item.source_id] += 1
                     continue
-                status = "rejected" if reasons or quality < 65 else ("accepted" if quality >= 75 else "review")
+                if reasons:
+                    status = "rejected"
+                elif quality >= 75 and not moderation.review_reasons:
+                    status = "accepted"
+                else:
+                    status = "review"
+                review_reason = ",".join(moderation.review_reasons)
+                if quality < 75:
+                    review_reason = ",".join(filter(None, [review_reason, "quality_below_75"]))
                 record = ContentCandidate(
                     source_id=item.source_id,
                     external_id=item.external_id,
@@ -553,11 +601,16 @@ class ContentPipeline:
                     title_fingerprint=title_fingerprint(item.title),
                     quality_score=quality,
                     status=status,
-                    rejection_reason=",".join(reasons) if reasons else ("quality_below_75" if quality < 75 else ""),
+                    rejection_reason=",".join(reasons) if reasons else review_reason,
                     metadata_json={
                         **item.metadata,
                         "pipelineRunId": run_id,
                         "contentSimhash": simhash64(f"{item.title} {item.summary}"),
+                        "moderation": {
+                            "ruleBlockingReasons": moderation.blocking_reasons,
+                            "ruleReviewReasons": moderation.review_reasons,
+                            "riskSnippets": moderation.risk_snippets,
+                        },
                     },
                 )
                 session.add(record)
@@ -570,6 +623,11 @@ class ContentPipeline:
                     stats["accepted"] += 1
                 elif status == "rejected":
                     stats["rejected"] += 1
+                    stats["ruleRejected"] += 1
+                    rejection_reasons.update(reasons or ["quality_below_65"])
+        stats["rejectionReasons"] = dict(
+            sorted(rejection_reasons.items(), key=lambda pair: (-pair[1], pair[0]))
+        )
         if self.adapters:
             client = self.adapters[0].client
             for source_id in {item.source_id for item in raw}:
@@ -580,6 +638,9 @@ class ContentPipeline:
                     duplicates=duplicates_by_source[source_id],
                     evaluated=True,
                 )
+        return accepted_ids, stats, self._pool_coverage(now)
+
+    def _pool_coverage(self, now: datetime) -> dict:
         pool_coverage: Counter[str] = Counter()
         with self.database.session() as session:
             for candidate in session.scalars(
@@ -592,8 +653,91 @@ class ContentPipeline:
                     candidate.content_kind, 30
                 ):
                     pool_coverage[candidate.topic] += 1
-        coverage = {topic: pool_coverage[topic] for topic in TOPICS}
-        return accepted_ids, stats, coverage
+        return {topic: pool_coverage[topic] for topic in TOPICS}
+
+    def _review_candidates(self, run_id: str) -> list[ContentCandidate]:
+        with self.database.session() as session:
+            candidates = list(session.scalars(
+                select(ContentCandidate)
+                .where(ContentCandidate.status == "review")
+                .order_by(ContentCandidate.quality_score.desc(), ContentCandidate.fetched_at.asc())
+            ))
+        return [
+            candidate
+            for candidate in candidates
+            if (candidate.metadata_json or {}).get("pipelineRunId") == run_id
+        ]
+
+    async def _moderate_review_candidates(
+        self,
+        run_id: str,
+        limit: int | None = None,
+    ) -> tuple[list[str], dict]:
+        maximum = min(
+            limit if limit is not None else self.settings.content_moderation_max_per_run,
+            self.settings.content_moderation_max_per_run,
+        )
+        stats = {
+            "accepted": 0,
+            "rejected": 0,
+            "aiAccepted": 0,
+            "aiRejected": 0,
+            "aiSkipped": 0,
+        }
+        reasons: Counter[str] = Counter()
+        accepted_ids: list[str] = []
+        candidates = self._review_candidates(run_id)
+        for index, snapshot in enumerate(candidates):
+            input_hash = moderation_input_hash(snapshot)
+            existing = (snapshot.metadata_json or {}).get("moderation") or {}
+            if index >= maximum:
+                result = {
+                    "decision": "reject",
+                    "confidence": 0,
+                    "reasons": ["moderation_run_limit"],
+                    "provider": "",
+                    "model": "",
+                    "inputHash": input_hash,
+                }
+            elif existing.get("inputHash") == input_hash and existing.get("decision") in {"approve", "reject"}:
+                result = existing
+            else:
+                result = await self.moderation.moderate(snapshot)
+            with self.database.session() as session:
+                candidate = session.get(ContentCandidate, snapshot.id)
+                if candidate is None or candidate.status != "review":
+                    continue
+                metadata = dict(candidate.metadata_json or {})
+                metadata["moderation"] = {
+                    **metadata.get("moderation", {}),
+                    "promptVersion": MODERATION_PROMPT_VERSION,
+                    "inputHash": result.get("inputHash") or input_hash,
+                    "decision": result.get("decision"),
+                    "confidence": result.get("confidence", 0),
+                    "provider": result.get("provider", ""),
+                    "model": result.get("model", ""),
+                    "reasons": list(result.get("reasons") or []),
+                }
+                candidate.metadata_json = metadata
+                approved = result.get("decision") == "approve" and result.get("confidence", 0) >= 0.85
+                if approved:
+                    candidate.status = "accepted"
+                    candidate.rejection_reason = ""
+                    accepted_ids.append(candidate.id)
+                    stats["accepted"] += 1
+                    stats["aiAccepted"] += 1
+                    continue
+                candidate.status = "rejected"
+                result_reasons = list(result.get("reasons") or ["ai_moderation_rejected"])
+                candidate.rejection_reason = ",".join(result_reasons)
+                stats["rejected"] += 1
+                reasons.update(result_reasons)
+                if set(result_reasons) & {"moderation_unavailable", "moderation_run_limit"}:
+                    stats["aiSkipped"] += 1
+                else:
+                    stats["aiRejected"] += 1
+        stats["reasons"] = dict(sorted(reasons.items(), key=lambda pair: (-pair[1], pair[0])))
+        return accepted_ids, stats
 
     def _cluster(self, candidate_ids: list[str]) -> list[str]:
         if not candidate_ids:
@@ -1147,6 +1291,10 @@ class ContentPipeline:
                         ArticleVariant.review_status == "approved",
                         ArticleVariant.cefr.in_(active_levels),
                         ArticleVariant.quality_score >= 85,
+                        or_(
+                            ArticleVariant.exam_track.is_(None),
+                            ArticleVariant.exam_track == "high_school",
+                        ),
                     )
                     .order_by(ArticleVariant.created_at.desc(), ArticleVariant.quality_score.desc())
                 )
@@ -1293,6 +1441,47 @@ class ContentPipeline:
                     if article.id not in {item.id for item in selected_articles}
                 ]
                 selected_articles = [*selected_articles, *extra][: max(3, len(selected_articles))]
+            high_school_candidates = sorted(
+                (article for article in articles if article.exam_track == "high_school"),
+                key=lambda article: (article.id not in recent_article_ids, article.created_at),
+                reverse=True,
+            )
+            high_school_picks: list[ArticleVariant] = []
+            preferred_level = "B1" if "B1" in active_levels else active_levels[0]
+            first = next(
+                (article for article in high_school_candidates if article.cefr == preferred_level),
+                high_school_candidates[0] if high_school_candidates else None,
+            )
+            if first is not None:
+                high_school_picks.append(first)
+                picked_ids = {first.id}
+                picked_topics = {first.topic}
+                for article in high_school_candidates:
+                    if (
+                        article.id not in picked_ids
+                        and article.topic not in picked_topics
+                        and article.cefr != first.cefr
+                    ):
+                        high_school_picks.append(article)
+                        picked_ids.add(article.id)
+                        picked_topics.add(article.topic)
+                        break
+                for article in high_school_candidates:
+                    if len(high_school_picks) >= 2:
+                        break
+                    if article.id not in picked_ids and article.topic not in picked_topics:
+                        high_school_picks.append(article)
+                        picked_ids.add(article.id)
+                        picked_topics.add(article.topic)
+            if high_school_picks:
+                pick_ids = {article.id for article in high_school_picks}
+                general = [
+                    article
+                    for article in selected_articles
+                    if article.exam_track is None and article.id not in pick_ids
+                ]
+                general_limit = max(0, self.settings.content_max_daily_variants - len(high_school_picks))
+                selected_articles = [*general[:general_limit], *high_school_picks]
             if len(selected_articles) < 3:
                 return 0
             edition = session.get(DailyEdition, local_date) or DailyEdition(edition_date=local_date)
@@ -1308,6 +1497,10 @@ class ContentPipeline:
                 },
                 "stories": len({article.story_cluster_id for article in selected_articles}),
                 "variants": len(selected_articles),
+                "tracks": {
+                    "general": sum(article.exam_track is None for article in selected_articles),
+                    "high_school": sum(article.exam_track == "high_school" for article in selected_articles),
+                },
             }
             edition.status = "published"
             edition.published_at = utc_now()
@@ -1406,6 +1599,15 @@ class ContentPipeline:
             "publishedCount": run.published_count,
             "sourceStats": run.source_stats,
             "topicCoverage": run.topic_coverage,
+            "editionCoverage": run.edition_coverage or {},
+            "moderationStats": run.moderation_stats or {
+                "reasons": {},
+                "ruleRejected": 0,
+                "aiAccepted": 0,
+                "aiRejected": 0,
+                "aiSkipped": 0,
+            },
+            "duplicateRate": round(run.duplicate_count / max(1, run.fetched_count), 4),
             "error": run.error,
             "startedAt": run.started_at.isoformat(),
             "finishedAt": run.finished_at.isoformat() if run.finished_at else None,

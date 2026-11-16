@@ -273,6 +273,8 @@ def test_source_policy_only_allows_licensed_full_text():
     licensed = {
         "soda-editorial",
         "nasa-rss",
+        "nsf-rss",
+        "energy-gov-rss",
         "noaa-rss",
         "usgs-rss",
         "federal-reserve-rss",
@@ -467,3 +469,106 @@ def test_exam_catalog_filters_tracks_and_never_enters_daily_feed(tmp_path, monke
     assert all(item["examTrack"] is None for item in feed_items)
     assert all(item["contentOrigin"] is None for item in feed_items)
     assert all(item["questions"] == [] for item in feed_items)
+
+
+def test_daily_feed_high_school_track_and_fallback(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from zoneinfo import ZoneInfo
+
+    from app.content import ContentService
+    from app.content_store import ArticleVariant, DailyEdition
+    from app.exam_store import ExamContentStore
+
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'daily-track.db'}",
+        editorial_provider_order="",
+    )
+    service = ContentService(settings)
+    store = ExamContentStore(service.database)
+    exam_dir = Path(__file__).parent.parent / "content" / "exams"
+    high_dir = Path(__file__).parent.parent / "content" / "high-school"
+    cet = store.import_passage(json.loads((exam_dir / "cet4-last-bus.json").read_text(encoding="utf-8")))
+    high_payloads = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(high_dir.glob("*.json"))
+    ]
+    high = store.import_passages(high_payloads)["items"]
+    with service.database.session() as session:
+        cet_article = session.get(ArticleVariant, cet["id"])
+        ordinary_ids = []
+        for index in range(3):
+            article_id = f"track-ordinary-{index}"
+            ordinary_ids.append(article_id)
+            session.add(ArticleVariant(
+                id=article_id,
+                story_cluster_id=cet_article.story_cluster_id,
+                source_candidate_id=cet_article.source_candidate_id,
+                title=f"Ordinary track reading {index}",
+                author="苏打阅读编辑部",
+                summary="普通轨道阅读导读。",
+                intro_zh="普通轨道阅读导读。",
+                paragraphs=["A complete opening.", "A connected body.", "A closed conclusion."],
+                sentence_translations={},
+                glossary=[],
+                body_hash=f"track-ordinary-hash-{index}",
+                cefr="B1",
+                word_count=12,
+                reading_minutes=2,
+                topic="文化",
+                content_mode="editorial_digest",
+                peer_review_status="not_applicable",
+                quality_score=90,
+                difficulty_metrics={},
+                source_published_at=datetime.now(timezone.utc),
+                sources=[],
+                risk_flags=[],
+                review_status="approved",
+                created_at=datetime.now(timezone.utc),
+            ))
+        today = datetime.now(ZoneInfo(settings.content_timezone)).date()
+        session.add(DailyEdition(
+            edition_date=today,
+            status="published",
+            article_ids=[cet["id"], *(item["id"] for item in high), *ordinary_ids],
+        ))
+    monkeypatch.setattr(main_module, "content_service", service)
+
+    daily_response = client.get("/feed/daily", params={"level": "B1", "track": "daily"})
+    assert daily_response.status_code == 200
+    daily_items = [daily_response.json()["primary"], *daily_response.json()["alternatives"]]
+    assert cet["id"] not in {item["id"] for item in daily_items}
+    assert any(item["examTrack"] is None for item in daily_items)
+
+    high_response = client.get("/feed/daily", params={"level": "B1", "track": "high_school"})
+    assert high_response.status_code == 200
+    high_items = [high_response.json()["primary"], *high_response.json()["alternatives"]]
+    assert high_response.json()["primary"]["examTrack"] == "high_school"
+    assert all(item["examTrack"] == "high_school" for item in high_items)
+    assert all(item["paragraphs"] for item in high_items)
+
+    daily_again = client.get("/feed/daily", params={"level": "B1", "track": "daily"}).json()
+    daily_again_items = [daily_again["primary"], *daily_again["alternatives"]]
+    assert any(item["examTrack"] is None for item in daily_again_items)
+
+    fallback = client.get("/feed/daily", params={"level": "C1", "track": "high_school"})
+    assert fallback.status_code == 200
+    assert fallback.json()["fallback"] is True
+    assert fallback.json()["primary"]["paragraphs"]
+    assert fallback.json()["primary"]["examTrack"] is None
+    assert client.get("/feed/daily", params={"track": "ielts"}).status_code == 422
+
+
+def test_high_school_local_dictionary_supports_offline_vocabulary():
+    response = client.post(
+        "/translations/word",
+        json={
+            "word": "library",
+            "sentence": "When he borrowed a library book for a history project, a folded note fell from its pages.",
+            "targetLanguage": "zh-CN",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["translation"] == "图书馆"
+    assert response.json()["provider"] == "local-corpus"

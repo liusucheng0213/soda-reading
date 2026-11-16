@@ -101,3 +101,59 @@ describe("feed matching", () => {
     expect(articleWithBody({ id: "kept", paragraphs: ["Own."] }, shelf).paragraphs).toEqual(["Own."]);
   });
 });
+
+
+describe("high-school track matching", () => {
+  const highB1 = {
+    id: "high-b1",
+    title: "High School B1",
+    cefr: "B1",
+    topic: "成长",
+    qualityScore: 70,
+    examTrack: "high_school",
+    paragraphs: ["A complete high-school paragraph."],
+  };
+  const highB2 = {
+    id: "high-b2",
+    title: "High School B2",
+    cefr: "B2",
+    topic: "文化",
+    qualityScore: 70,
+    examTrack: "high_school",
+    paragraphs: ["Another complete high-school paragraph."],
+  };
+
+  it("prefers high school over a higher-scored ordinary article at the same CEFR", () => {
+    const shown = displayFeed(
+      { primary: library[1], alternatives: [highB1] },
+      { level: "B1", track: "high_school" },
+      library,
+    );
+    expect(shown.primary.id).toBe("high-b1");
+    expect(shown.standby).toBe(false);
+    expect(shown.trackMatched).toBe(true);
+  });
+
+  it("falls back to an ordinary exact-level article without relabeling it", () => {
+    const cet = { ...library[1], id: "cet-b1", examTrack: "cet4", qualityScore: 100 };
+    const shown = displayFeed(
+      { primary: highB2, alternatives: [cet] },
+      { level: "B1", track: "high_school" },
+      library,
+    );
+    expect(shown.primary.id).toBe("b1");
+    expect(shown.primary.examTrack).toBeUndefined();
+    expect(shown.primary.id).not.toBe("cet-b1");
+    expect(shown.trackMatched).toBe(false);
+    expect(shown.standby).toBe(true);
+    expect(shown.exactMatch).toBe(true);
+  });
+
+  it("keeps CEFR switching live inside the high-school track", () => {
+    const feed = { primary: highB1, alternatives: [highB2] };
+    const b1 = displayFeed(feed, { level: "B1", track: "high_school" }, library);
+    const b2 = displayFeed(feed, { level: "B2", track: "high_school" }, library);
+    expect(b1.primary.id).toBe("high-b1");
+    expect(b2.primary.id).toBe("high-b2");
+  });
+});

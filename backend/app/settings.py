@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     editorial_provider_timeout_ms: int = 30000
     editorial_total_timeout_ms: int = 75000
     content_prefer_original: bool = True
+    content_moderation_timeout_ms: int = 12000
+    content_moderation_max_per_run: int = 6
 
     @property
     def origins(self) -> list[str]:

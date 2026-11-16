@@ -5,7 +5,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .content_pipeline import ContentPipeline
 from .model_center import ModelCenterStore
@@ -179,6 +179,15 @@ def rank_fallback(articles: list[dict], preferences: dict) -> list[dict]:
     )
 
 
+def _daily_track_clause(track: str):
+    if track == "high_school":
+        return ArticleVariant.exam_track == "high_school"
+    return or_(
+        ArticleVariant.exam_track.is_(None),
+        ArticleVariant.exam_track == "high_school",
+    )
+
+
 class ContentService:
     def __init__(self, settings: Settings, model_store: ModelCenterStore | None = None):
         self.settings = settings
@@ -239,6 +248,8 @@ class ContentService:
 
     def daily_feed(self, preferences: dict, user_id: str) -> dict:
         local_date = datetime.now(ZoneInfo(self.settings.content_timezone)).date()
+        track = preferences.get("track", "daily")
+        track_clause = _daily_track_clause(track)
         preference_hash = hashlib.sha256(
             json.dumps(preferences, ensure_ascii=False, sort_keys=True).encode()
         ).hexdigest()
@@ -268,7 +279,7 @@ class ContentService:
             ):
                 article_ids = [existing.primary_article_id, *existing.alternative_article_ids]
                 stored = list(session.scalars(
-                    select(ArticleVariant).where(ArticleVariant.id.in_(article_ids), ArticleVariant.exam_track.is_(None))
+                    select(ArticleVariant).where(ArticleVariant.id.in_(article_ids), track_clause)
                 ))
                 by_id = {article.id: article for article in stored}
                 if all(article_id in by_id for article_id in article_ids):
@@ -285,9 +296,10 @@ class ContentService:
                     }
 
             articles = list(session.scalars(
-                select(ArticleVariant).where(ArticleVariant.id.in_(edition.article_ids), ArticleVariant.exam_track.is_(None))
+                select(ArticleVariant).where(ArticleVariant.id.in_(edition.article_ids), track_clause)
             ))
-            if len(articles) < 3:
+            minimum_articles = 1 if track == "high_school" else 3
+            if len(articles) < minimum_articles:
                 return self._fallback(preferences)
             recent_recommendations = list(session.scalars(
                 select(DailyRecommendation).where(

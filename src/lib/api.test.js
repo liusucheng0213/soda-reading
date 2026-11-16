@@ -194,3 +194,23 @@ describe("local daily feed", () => {
     expect(feed.primary.paragraphs.length).toBeGreaterThan(0);
   });
 });
+
+
+describe("daily track API", () => {
+  it("sends the selected reading track to the backend", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        primary: { id: "ordinary", cefr: "B1", paragraphs: ["A complete paragraph."] },
+        alternatives: [],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getDailyFeed } = await import("./api.js");
+
+    await getDailyFeed({ level: "B1", track: "high_school", topics: ["文化"] });
+
+    expect(fetchMock.mock.calls[0][0]).toContain("track=high_school");
+  });
+});

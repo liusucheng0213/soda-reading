@@ -8,6 +8,7 @@ import {
 import { sourcePolicies } from "./data.js";
 import { ModelTaskRoutes } from "./screens/ModelTaskRoutes.jsx";
 import { ModelUsageSummary } from "./screens/ModelUsageSummary.jsx";
+import { duplicatePercent, editionTrackCounts, rejectionReasonLabel, rejectionReasonRows } from "./lib/admin-content.js";
 import {
   getContentCandidates,
   getContentRuns,
@@ -180,6 +181,8 @@ export function AdminApp() {
     (left, right) => (left.routeRank ?? 99) - (right.routeRank ?? 99),
   );
   const latestRun = runs[0];
+  const trackCounts = editionTrackCounts(latestRun);
+  const rejectionRows = rejectionReasonRows(latestRun);
   const acceptedCandidates = candidates.filter((item) => item.status === "accepted").length;
   const activeSources = sources.filter((item) => item.status === "active").length;
   const qualifiedPool = latestRun
@@ -224,8 +227,8 @@ export function AdminApp() {
         {adminTab === "sources" && (
           <>
             <section className="admin-summary">
-              <article><span>活跃来源</span><strong>{activeSources}</strong><small>只抓已许可、可全文的来源</small></article>
-              <article><span>通过 / 抓取</span><strong>{runRatio(latestRun)}</strong><small>{latestRun ? `去重 ${latestRun.duplicateCount} · 淘汰 ${latestRun.rejectedCount}` : "等待首次采集"}</small></article>
+              <article><span>活跃来源</span><strong>{activeSources}</strong><small>许可与全文权限分别记录</small></article>
+              <article><span>通过 / 抓取</span><strong>{runRatio(latestRun)}</strong><small>{latestRun ? `去重 ${latestRun.duplicateCount} · 淘汰 ${latestRun.rejectedCount} · 重复率 ${duplicatePercent(latestRun)}` : "等待首次采集"}</small></article>
               <article><span>已配置翻译路由</span><strong>{configuredProviders}</strong><small>{configuredProviders ? "密钥只保存在后端" : "请在「模型路由」填写 Key"}</small></article>
             </section>
             <section className="admin-panel pipeline-panel">
@@ -243,10 +246,20 @@ export function AdminApp() {
                 <div><span>淘汰</span><strong>{latestRun?.rejectedCount ?? 0}</strong></div>
                 <div><span>生成导读</span><strong>{latestRun?.generatedCount ?? 0}</strong></div>
                 <div><span>已发布</span><strong>{latestRun?.publishedCount ?? 0}</strong></div>
+                <div><span>重复率</span><strong>{duplicatePercent(latestRun)}</strong></div>
+                <div><span>高中发布</span><strong>{trackCounts.high_school}</strong></div>
+                <div><span>普通发布</span><strong>{trackCounts.general}</strong></div>
               </div>
               <div className="coverage-row">
                 {["科技", "文化", "商业", "自然", "健康", "历史"].map((topic) => (
                   <span key={topic}>{topic}<strong>{latestRun?.topicCoverage?.[topic] ?? 0}</strong></span>
+                ))}
+              </div>
+              <div className="moderation-reasons">
+                <span>审核拒绝原因</span>
+                {rejectionRows.length === 0 && <small>暂无记录</small>}
+                {rejectionRows.map(([code, count]) => (
+                  <small key={code}>{rejectionReasonLabel(code)}<strong>{count}</strong></small>
                 ))}
               </div>
             </section>
@@ -274,11 +287,15 @@ export function AdminApp() {
                 {candidates.length === 0 && <p className="provider-empty">暂无采集结果，可先点「采集并发布」。</p>}
                 {candidates.map((candidate) => (
                   <a href={candidate.url} target="_blank" rel="noreferrer" className="candidate-row" key={candidate.id}>
-                    <div><strong>{candidate.title}</strong><small>{candidate.sourceId} · {candidate.publishedAt?.slice(0, 10)}</small></div>
+                    <div>
+                      <strong>{candidate.title}</strong>
+                      <small>{candidate.sourceId} · {candidate.publishedAt?.slice(0, 10)}</small>
+                      {candidate.rejectionReason && <small className="candidate-reason">{candidate.rejectionReason.split(",").map(rejectionReasonLabel).join(" · ")}</small>}
+                    </div>
                     <span>{candidate.topic}</span>
                     <span>{candidate.sourceTier} 级</span>
                     <span>{Math.round(candidate.qualityScore)} 分</span>
-                    <i className={`candidate-state ${candidate.status}`}>{candidate.status === "accepted" ? "通过" : candidate.status === "review" ? "复核" : "淘汰"}</i>
+                    <i className={`candidate-state ${candidate.status}`}>{candidate.status === "accepted" ? "通过" : candidate.status === "review" ? "边界" : "淘汰"}</i>
                   </a>
                 ))}
               </div>

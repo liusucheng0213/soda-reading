@@ -174,5 +174,7 @@ class ExamContentStore:
             )
             if track:
                 statement = statement.where(ArticleVariant.exam_track == track)
+            else:
+                statement = statement.where(ArticleVariant.exam_track.in_(("cet4", "cet6", "postgraduate")))
             articles = session.scalars(statement.order_by(ArticleVariant.exam_track, ArticleVariant.title)).all()
             return [ContentService._article_dict(article, 0) for article in articles]

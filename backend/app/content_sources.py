@@ -177,6 +177,36 @@ SOURCE_POLICIES = [
         freshnessClass="news",
     ),
     SourcePolicy(
+        id="nsf-rss",
+        name="U.S. National Science Foundation News",
+        license="NSF 官方政府文字可复用并署名；明确第三方文字与视觉材料排除",
+        crawlAllowed=True,
+        fullTextAllowed=True,
+        status="active",
+        sourceTier="A",
+        sourceType="rss",
+        endpoint="https://www.nsf.gov/rss/rss_www_news.xml",
+        allowedContentHosts=["nsf.gov"],
+        topics=["科技", "自然", "商业"],
+        peerReviewDefault="not_applicable",
+        freshnessClass="news",
+    ),
+    SourcePolicy(
+        id="energy-gov-rss",
+        name="U.S. Department of Energy News",
+        license="DOE 政府网站文字属公有领域并需署名；第三方材料逐项排除",
+        crawlAllowed=True,
+        fullTextAllowed=True,
+        status="active",
+        sourceTier="A",
+        sourceType="rss",
+        endpoint="https://www.energy.gov/rss/articles.xml",
+        allowedContentHosts=["energy.gov"],
+        topics=["科技", "自然", "商业"],
+        peerReviewDefault="not_applicable",
+        freshnessClass="news",
+    ),
+    SourcePolicy(
         id="noaa-rss",
         name="NOAA National Ocean Service News",
         license="美国政府作品；第三方材料剔除后可保存正文",
@@ -864,6 +894,31 @@ class WorldBankAdapter(SourceAdapter):
 
 
 class RssAdapter(SourceAdapter):
+    def _content_url_allowed(self, url: str) -> bool:
+        allowed = getattr(self.policy, "allowedContentHosts", [])
+        if not allowed:
+            return True
+        host = (urlparse(url).hostname or "").lower()
+        return any(host == expected or host.endswith(f".{expected}") for expected in allowed)
+
+    @staticmethod
+    def _rights_restricted(text: str) -> bool:
+        return re.search(
+            r"\ball\s+rights\s+reserved\b|\bcopyright\b|©"
+            r"|\breprinted\s+(?:with\s+permission|from)\b"
+            r"|\b(?:used|reproduced)\s+with\s+permission\b",
+            text,
+            flags=re.IGNORECASE,
+        ) is not None
+
+    def _metadata_only(self, reason: str, **values: Any) -> RawCandidate:
+        return self.candidate(
+            **values,
+            metadata={},
+            full_text_allowed=False,
+            license=f"仅索引；{reason}",
+        )
+
     async def fetch(self, limit: int, offset: int = 0) -> list[RawCandidate]:
         response = await self.client.get(self.policy)
         if response is None and self.policy.fullTextAllowed:
@@ -915,6 +970,28 @@ class RssAdapter(SourceAdapter):
                 "{http://www.w3.org/2005/Atom}author",
             ])]
             external_id = self._text(item, ["guid", "{http://www.w3.org/2005/Atom}id"]) or url
+            if self.policy.fullTextAllowed and not self._content_url_allowed(url):
+                results.append(self._metadata_only(
+                    "外部链接正文未采集",
+                    external_id=external_id,
+                    title=title,
+                    url=url,
+                    published_at=published,
+                    summary=summary,
+                    authors=authors,
+                ))
+                continue
+            if self.policy.fullTextAllowed and self._rights_restricted("\n".join(paragraphs)):
+                results.append(self._metadata_only(
+                    "第三方文字权利未确认",
+                    external_id=external_id,
+                    title=title,
+                    url=url,
+                    published_at=published,
+                    summary=summary,
+                    authors=authors,
+                ))
+                continue
             if self.policy.fullTextAllowed and len(paragraphs) < 3:
                 pending_pages.append({
                     "title": title,
@@ -949,9 +1026,29 @@ class RssAdapter(SourceAdapter):
         return results
 
     async def _excerpt_page(self, item: dict[str, Any]) -> RawCandidate | None:
+        if not self._content_url_allowed(item["url"]):
+            return self._metadata_only(
+                "外部链接正文未采集",
+                external_id=item["external_id"],
+                title=item["title"],
+                url=item["url"],
+                published_at=item["published"],
+                summary=item["summary"],
+                authors=item["authors"],
+            )
         paragraphs = await self._paragraphs_from_page(item["url"])
         if len(paragraphs) < 3:
             return None
+        if self._rights_restricted("\n".join(paragraphs)):
+            return self._metadata_only(
+                "第三方文字权利未确认",
+                external_id=item["external_id"],
+                title=item["title"],
+                url=item["url"],
+                published_at=item["published"],
+                summary=item["summary"],
+                authors=item["authors"],
+            )
         return self.candidate(
             external_id=item["external_id"],
             title=item["title"],

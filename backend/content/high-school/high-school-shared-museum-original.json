@@ -1,0 +1,68 @@
+{
+  "id": "high-school-shared-museum-original",
+  "title": "The Museum That Shared Its Keys",
+  "author": "苏打阅读编辑部",
+  "topic": "文化",
+  "cefr": "B2",
+  "publishedAt": "2026-11-16T08:30:00+08:00",
+  "introZh": "一座博物馆把钥匙交给社区居民，在开放更多声音的同时守住准确性。",
+  "paragraphs": [
+    "When the Harbor Museum renovated its storage rooms, its directors faced an unusual choice. They could keep the old keys in a display case, or they could lend them to local residents who wanted to explore the building's history. They chose the second option and invited shopkeepers, retired sailors, and students to become caretakers of particular rooms.",
+    "The project changed the way stories entered the museum. A baker described how deliveries had once arrived before sunrise, while a former sailor recognized markings that showed where heavy machinery had been repaired. Instead of presenting a single official account, the museum recorded these memories alongside architectural drawings and shipping registers. Visitors could then compare personal recollections with documentary evidence.",
+    "Some curators worried that untrained volunteers might damage fragile objects or repeat unreliable tales. The museum responded with training sessions, clear handling rules, and a requirement that every story identify its source. The keys therefore represent more than access to locked rooms. They stand for a careful form of trust: opening the collection to more voices without abandoning accuracy."
+  ],
+  "examTrack": "high_school",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "What did the museum directors decide to do with the old keys?",
+      "options": ["Sell them to retired sailors", "Keep all of them in a display case", "Lend them to local residents", "Give them to a machinery company"],
+      "answer": "C",
+      "explanationZh": "董事们选择把钥匙借给想探索建筑历史的当地居民。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "They could keep the old keys in a display case, or they could lend them to local residents who wanted to explore the building's history."
+    },
+    {
+      "id": "q2",
+      "prompt": "How did the project change the museum's stories?",
+      "options": ["Personal memories were presented alongside documents", "Only the directors could describe the building", "Architectural drawings replaced all interviews", "Shipping registers were removed from the collection"],
+      "answer": "A",
+      "explanationZh": "博物馆把居民记忆与建筑图纸、航运记录并列展示，让参观者比较不同材料。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "Instead of presenting a single official account, the museum recorded these memories alongside architectural drawings and shipping registers."
+    },
+    {
+      "id": "q3",
+      "prompt": "What does 'account' most nearly mean in the second paragraph?",
+      "options": ["A bank balance", "A description of events", "A room key", "A repair bill"],
+      "answer": "B",
+      "explanationZh": "official account 在这里指官方的事件叙述，而不是银行账户。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "Instead of presenting a single official account, the museum recorded these memories alongside architectural drawings and shipping registers."
+    },
+    {
+      "id": "q4",
+      "prompt": "Why did the museum introduce training and handling rules?",
+      "options": ["To keep personal stories out of the museum", "To reduce the number of student visitors", "To sell more copies of the shipping registers", "To welcome more voices while protecting objects and accuracy"],
+      "answer": "D",
+      "explanationZh": "培训和规则回应了物品损坏与故事不可靠的担忧，体现开放与准确之间的平衡。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "They stand for a careful form of trust: opening the collection to more voices without abandoning accuracy."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "high-school-shared-museum-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-16T09:15:00+08:00",
+  "answersReviewedAt": "2026-11-16T09:45:00+08:00"
+}

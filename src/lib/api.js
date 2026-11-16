@@ -152,7 +152,10 @@ async function request(path, options = {}) {
 }
 
 export async function getDailyFeed(preferences = {}) {
-  const query = new URLSearchParams({ level: preferences.level || "B1" });
+  const query = new URLSearchParams({
+    level: preferences.level || "B1",
+    track: preferences.track === "high_school" ? "high_school" : "daily",
+  });
   for (const topic of preferences.topics?.length ? preferences.topics.slice(0, 4) : ["文化"]) {
     query.append("topics", topic);
   }

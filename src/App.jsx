@@ -348,6 +348,7 @@ function SodaApp() {
             resume={canResume ? { ...resume, progress: resumeProgress } : null}
             onOpen={openArticle}
             onLevelChange={(level) => updateProfile({ ...profile, level })}
+            onTrackChange={(track) => updateProfile({ ...profile, track })}
             closedArticleId={closedArticleId}
             reviewCount={dueReviewCount}
             onReview={() => {
@@ -456,15 +457,23 @@ function OnboardingScreen({ onComplete, onStart }) {
   );
 }
 
-function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticleId, reviewCount = 0, onReview }) {
+const HOME_TRACKS = [
+  { id: "daily", label: "日常" },
+  { id: "high_school", label: "高中" },
+];
+
+function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, onTrackChange, closedArticleId, reviewCount = 0, onReview }) {
   const primary = feed.primary ?? demoArticle;
   const alternatives = feed.alternatives ?? [];
   const intro = primary.introZh || primary.summary;
   const featuredProgress = resume?.id === primary.id ? resume.progress : 0;
+  const title = profile.track === "high_school"
+    ? (feed.standby ? "高中备用导读" : "高中今日阅读")
+    : (feed.standby ? "备用导读" : "今日阅读");
   return (
     <section className="screen home-screen">
       <header className="screen-header">
-        <div><span className="eyebrow">{todayLabel()}</span><h1>{feed.standby ? "备用导读" : "今日阅读"}</h1></div>
+        <div><span className="eyebrow">{todayLabel()}</span><h1>{title}</h1></div>
         <div className="level-switcher" role="tablist" aria-label="阅读水平">
           {levelOptions.map((option) => (
             <button
@@ -480,6 +489,20 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticl
           ))}
         </div>
       </header>
+      <div className="level-switcher track-switcher" role="tablist" aria-label="内容轨道">
+        {HOME_TRACKS.map((track) => (
+          <button
+            key={track.id}
+            type="button"
+            role="tab"
+            aria-selected={profile.track === track.id}
+            className={profile.track === track.id ? "selected" : ""}
+            onClick={() => onTrackChange(track.id)}
+          >
+            {track.label}
+          </button>
+        ))}
+      </div>
       {resume && resume.id !== primary.id && (
         <button className="resume-strip" type="button" onClick={() => onOpen(resume)}>
           <span>接着读</span>
@@ -489,7 +512,7 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticl
       )}
       {reviewCount > 0 && <button type="button" className="review-today-link" onClick={onReview}>{reviewCount} 张生词待复习 <span>开始复习</span></button>}
       <article className="featured-reading">
-        <div className="article-meta"><span>{primary.topic}</span><span>{primary.cefr} · {remainingMinutes(primary, featuredProgress)} 分钟</span></div>
+        <div className="article-meta"><span>{primary.examTrack === "high_school" ? EXAM_TRACK_LABELS.high_school : primary.topic}</span><span>{primary.cefr} · {remainingMinutes(primary, featuredProgress)} 分钟</span></div>
         <h2>{primary.title}</h2>
         <p className="article-intro">{intro}</p>
         <div className="source-line"><span>{primary.source}</span>{freshnessLabel(primary) && <><span>·</span><time>{freshnessLabel(primary)}</time></>}</div>
@@ -505,7 +528,7 @@ function HomeScreen({ profile, feed, resume, onOpen, onLevelChange, closedArticl
             {alternatives.map((article) => (
               <div key={article.id}>
                 <button className="article-row" onClick={() => onOpen(article)}>
-                  <span className="article-topic">{article.topic}</span>
+                  <span className="article-topic">{article.examTrack === "high_school" ? EXAM_TRACK_LABELS.high_school : article.topic}</span>
                   <span className="article-row-copy">
                     <strong>{article.title}</strong>
                     {(article.introZh || article.summary) && <em>{article.introZh || article.summary}</em>}

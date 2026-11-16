@@ -15,7 +15,7 @@ from app.settings import Settings
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("用法：PYTHONPATH=. python scripts/import_exam_content.py content/exams", file=sys.stderr)
+        print("用法：PYTHONPATH=. python scripts/import_exam_content.py content/exams 或 content/high-school", file=sys.stderr)
         return 2
     directory = Path(sys.argv[1])
     paths = sorted(directory.glob("*.json"))

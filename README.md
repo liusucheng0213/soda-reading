@@ -23,9 +23,10 @@
 - 全文逐章听读、句级跟读、慢/常/快、跨章查找、复制原句和剩余分钟。
 - 连续生词标记、两阶段主动回忆、分批 FSRS、忘记重排、完整撤销和可恢复的已掌握词库；「原文」回到正确章节。
 - 书架新增 CET4 / CET6 / 考研筛选；首批 6 篇原创模拟阅读含四选一题、中文解析和原文依据，答题状态仅保留在当前阅读会话。
+- 今日页新增「日常 / 高中」轨道；4 篇高中原创模拟覆盖 A2/B1/B2，CEFR 切换、答题、收藏、本文复习和原句返回均可使用。
 - EPUB/TXT 章节目录、PDF 页码导航、按章阅读位置和全书加权进度。
 - 本地 JSON 备份/恢复、书籍删除和分类清空；不包含模型密钥。
-- 本机 `/admin` 保留手动采集、自动验证和统一模型中心：三任务路由、密钥掩码、共享预算、实际/估算 token 统计和持久翻译缓存清理；阅读端没有账号或管理入口。
+- 本机 `/admin` 保留手动采集、自动验证和统一模型中心：三任务路由、密钥掩码、共享预算、实际/估算 token 统计和持久翻译缓存清理；新增重复率、主题/轨道覆盖和审核拒绝原因。阅读端没有账号或管理入口。
 
 ## 架构
 
@@ -108,7 +109,7 @@ $env:PYTHONPATH="."
 ..\.venv\Scripts\python.exe -m pytest -q
 ```
 
-需要导入随项目提供的 6 篇原创备考模拟内容时，在 `backend/` 目录执行 `PYTHONPATH=. python scripts/import_exam_content.py content/exams`。重复执行不会重复建文；内容修订请使用新 ID。内容核验规则见 [内容管道运维](docs/content-pipeline-operations.md#考试内容包)。
+需要导入随项目提供的 6 篇原创备考模拟内容时，在 `backend/` 目录执行 `PYTHONPATH=. python scripts/import_exam_content.py content/exams`；导入另外 4 篇高中原创模拟时执行 `PYTHONPATH=. python scripts/import_exam_content.py content/high-school`。重复执行不会重复建文；内容修订请使用新 ID。内容核验规则见 [内容管道运维](docs/content-pipeline-operations.md#考试内容包)。
 
 ## 本地运行注意事项
 

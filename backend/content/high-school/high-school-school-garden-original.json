@@ -1,0 +1,68 @@
+{
+  "id": "high-school-school-garden-original",
+  "title": "A Small Garden at School",
+  "author": "苏打阅读编辑部",
+  "topic": "校园",
+  "cefr": "A2",
+  "publishedAt": "2026-11-16T08:00:00+08:00",
+  "introZh": "一个校园角落如何变成花园，又如何教会学生合作与负责。",
+  "paragraphs": [
+    "At the start of autumn, Class 2 found a dusty corner behind their school library. The ground was hard, and nothing grew there. Their teacher, Ms. Lin, asked the class to turn it into a small garden. Every student chose a job, from carrying water to making signs.",
+    "At first, the students argued about where to put the plants. Tom wanted tall flowers in the middle, but Amy said they would block the sunlight. The class tested two plans for a week and watched which plants grew well. In the end, they put short vegetables in the sunniest place and moved the flowers to the edge.",
+    "By winter, the corner had become a favorite place for quiet reading and friendly talks. The garden did not just teach the students about plants. It also showed them that a shared space grows best when everyone listens, tries ideas, and takes responsibility."
+  ],
+  "examTrack": "high_school",
+  "contentOrigin": "original",
+  "year": null,
+  "session": "",
+  "region": "",
+  "paper": "",
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "Where was the dusty corner?",
+      "options": ["Behind the school library", "Beside the sports field", "Inside the classroom", "Across from the garden shop"],
+      "answer": "A",
+      "explanationZh": "第一段明确说明这个角落在学校图书馆后面。",
+      "evidenceParagraph": 0,
+      "evidenceSentence": "At the start of autumn, Class 2 found a dusty corner behind their school library."
+    },
+    {
+      "id": "q2",
+      "prompt": "Why did the class test two plans?",
+      "options": ["To choose a new teacher", "To see which plants grew well", "To make the flowers taller", "To find a bigger library"],
+      "answer": "B",
+      "explanationZh": "学生们通过一周观察比较方案，目的是看哪种安排让植物长得好。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "The class tested two plans for a week and watched which plants grew well."
+    },
+    {
+      "id": "q3",
+      "prompt": "What does 'block' most nearly mean in Amy's words?",
+      "options": ["Cover something with paint", "Carry something heavy", "Stop light from reaching an area", "Move something to the edge"],
+      "answer": "C",
+      "explanationZh": "Amy 担心中间的高花挡住阳光，因此 block 在这里指阻挡光线。",
+      "evidenceParagraph": 1,
+      "evidenceSentence": "Tom wanted tall flowers in the middle, but Amy said they would block the sunlight."
+    },
+    {
+      "id": "q4",
+      "prompt": "What is the main lesson of the story?",
+      "options": ["Gardens need expensive tools", "Flowers are better than vegetables", "Reading should happen outdoors", "Shared work teaches cooperation and responsibility"],
+      "answer": "D",
+      "explanationZh": "结尾点明，共同维护空间让大家学会倾听、尝试和负责。",
+      "evidenceParagraph": 2,
+      "evidenceSentence": "It also showed them that a shared space grows best when everyone listens, tries ideas, and takes responsibility."
+    }
+  ],
+  "provenance": {
+    "sourceLabel": "苏打阅读原创模拟",
+    "sourceId": "high-school-school-garden-original",
+    "sourceUrl": null,
+    "retrievedAt": null,
+    "license": "项目原创",
+    "usageBasis": "原创模拟内容，不对应或复制任何真实试卷。"
+  },
+  "sourceReviewedAt": "2026-11-16T09:00:00+08:00",
+  "answersReviewedAt": "2026-11-16T09:30:00+08:00"
+}

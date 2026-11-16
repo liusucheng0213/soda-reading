@@ -59,3 +59,13 @@ describe("local profile", () => {
     expect(JSON.parse(store.get("soda.account.admin.vocabulary"))[0].word).toBe("shade");
   });
 });
+
+
+describe("reading track preference", () => {
+  it("defaults to daily and only accepts supported tracks", () => {
+    expect(normalizeProfile(null).track).toBe("daily");
+    expect(normalizeProfile({ track: "high_school" }).track).toBe("high_school");
+    expect(normalizeProfile({ track: "cet4" }).track).toBe("daily");
+    expect(normalizeProfile({ track: "ielts" }).track).toBe("daily");
+  });
+});
